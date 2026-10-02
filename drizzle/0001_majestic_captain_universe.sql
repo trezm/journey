@@ -1,0 +1,1 @@
+CREATE INDEX `idx_projects_owner` ON `projects` (`owner`);

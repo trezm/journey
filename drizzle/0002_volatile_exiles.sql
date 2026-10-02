@@ -1,0 +1,1 @@
+ALTER TABLE `agents` ADD `role` text DEFAULT 'worker' NOT NULL;

@@ -1,0 +1,118 @@
+import { inflateSync, deflateSync } from 'node:zlib';
+import { insist, type Files } from './core.ts';
+const utf8 = new TextEncoder();
+const decoder = new TextDecoder('utf-8', { fatal: true });
+export type Entry = { mode: string; oid: string };
+export type Entries = Record<string, Entry>;
+export function concatenate(...chunks: Uint8Array[]) { const out = new Uint8Array(chunks.reduce((n, c) => n + c.length, 0)); let i = 0; for (const c of chunks) { out.set(c, i); i += c.length; } return out; }
+export async function object(type: string, body: Uint8Array) { const raw = concatenate(utf8.encode(`${type} ${body.length}\0`), body); const oid = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-1', raw))).map(b => b.toString(16).padStart(2, '0')).join(''); return { oid, raw }; }
+export function validPath(path: string) { return path.length <= 1000 && !/[\x00-\x1f\\]/.test(path) && path.split('/').every(p => p && p !== '.' && p !== '..' && p.toLowerCase() !== '.git'); }
+export function parseTree(body: Uint8Array): { name: string; mode: string; oid: string }[] {
+    const entries = []; let offset = 0;
+    while (offset < body.length) {
+        const space = body.indexOf(32, offset), nul = body.indexOf(0, space + 1);
+        insist(space > offset && nul > space && nul + 21 <= body.length, 'invalid_tree', 'Malformed Git tree.', 400);
+        const mode = decoder.decode(body.subarray(offset, space)), name = decoder.decode(body.subarray(space + 1, nul));
+        insist(['40000', '100644', '100755', '120000', '160000'].includes(mode) && validPath(name) && !name.includes('/'), 'invalid_tree', 'Unsupported Git tree entry.', 400);
+        entries.push({ name, mode, oid: Buffer.from(body.subarray(nul + 1, nul + 21)).toString('hex') }); offset = nul + 21;
+    }
+    insist(new Set(entries.map(e => e.name)).size === entries.length, 'invalid_tree', 'Duplicate tree entry.', 400);
+    return entries;
+}
+export function decodeObject(compressed: Uint8Array) {
+    const raw = inflateSync(compressed, { maxOutputLength: 20_000_000 }); const nul = raw.indexOf(0);
+    const header = raw.subarray(0, nul).toString('utf8'); const match = /^(blob|tree|commit|tag) (\d+)$/.exec(header);
+    insist(nul > 0 && match && Number(match[2]) === raw.length - nul - 1, 'invalid_object', 'Malformed Git object.', 400);
+    const body = raw.subarray(nul + 1); return { type: match[1], body, raw };
+}
+export function references(type: string, body: Uint8Array): string[] {
+    if (type === 'blob') return [];
+    if (type === 'tree') return parseTree(body).filter(e => e.mode !== '160000').map(e => e.oid);
+    const header = new TextDecoder().decode(body).split('\n\n')[0];
+    const refs = [...header.matchAll(type === 'tag' ? /^object ([a-f0-9]{40})$/gm : /^(?:tree|parent) ([a-f0-9]{40})$/gm)].map(m => m[1]);
+    insist(refs.length && (type !== 'commit' || /^tree [a-f0-9]{40}$/m.test(header)), 'invalid_object', 'Git commit/tag has no valid target.', 400);
+    return refs;
+}
+export async function makeCommit(files: Files, parent: string | undefined, message: string, actor: string, at = Date.now(), preserved: Entries = {}) {
+    const objects: { oid: string; raw: Uint8Array }[] = [];
+    const entries: Entries = Object.assign(Object.create(null), preserved);
+    for (const [path, text] of Object.entries(files)) {
+        insist(validPath(path), 'invalid_path', 'Use relative file paths without traversal.', 400);
+        insist(utf8.encode(text).length <= 500000, 'file_too_large', 'Editable text files must be at most 500 KB.', 413);
+        const blob = await object('blob', utf8.encode(text)); objects.push(blob);
+        entries[path] = { oid: blob.oid, mode: entries[path]?.mode ?? '100644' };
+    }
+    type Tree = { [name: string]: Entry | Tree };
+    const root: Tree = Object.create(null);
+    for (const [path, entry] of Object.entries(entries)) {
+        const parts = path.split('/'); let t = root;
+        for (const part of parts.slice(0, -1)) {
+            insist(!t[part] || typeof t[part].oid !== 'string', 'path_collision', 'A path is both a file and a directory.', 400);
+            t[part] ??= Object.create(null); t = t[part] as Tree;
+        }
+        const name = parts.at(-1)!;
+        insist(!t[name] || typeof t[name].oid === 'string', 'path_collision', 'A path is both a file and a directory.', 400); t[name] = entry;
+    }
+    async function build(t: Tree): Promise<string> {
+        const chunks: Uint8Array[] = [];
+        const names = Object.keys(t).sort((a, b) => Buffer.compare(Buffer.from(a + (typeof t[a].oid === 'string' ? '' : '/')), Buffer.from(b + (typeof t[b].oid === 'string' ? '' : '/'))));
+        for (const name of names) {
+            const v = t[name]; const entry = typeof v.oid === 'string' ? v as Entry : { oid: await build(v as Tree), mode: '40000' };
+            chunks.push(concatenate(utf8.encode(`${entry.mode} ${name}\0`), Buffer.from(entry.oid, 'hex')));
+        }
+        const tree = await object('tree', concatenate(...chunks)); objects.push(tree); return tree.oid;
+    }
+    const tree = await build(root), name = actor.replace(/[\n\r<>]/g, '').slice(0, 80) || 'Agent';
+    const identity = `${name} <agent@journey.local> ${Math.floor(at / 1000)} +0000`;
+    const commit = await object('commit', utf8.encode(`tree ${tree}\n${parent ? `parent ${parent}\n` : ''}author ${identity}\ncommitter ${identity}\n\n${message.replace(/\r/g, '')}\n`));
+    objects.push(commit); return { oid: commit.oid, objects, files, entries, parent, message, actor, at };
+}
+export class GitStore {
+    private bucket: R2Bucket; private project: string;
+    constructor(bucket: R2Bucket, project: string) { this.bucket = bucket; this.project = project; }
+    key(oid: string) { insist(/^[a-f0-9]{40}$/.test(oid), 'invalid_revision', 'Invalid Git object hash.', 400); return `${this.project}/objects/${oid.slice(0, 2)}/${oid.slice(2)}`; }
+    async read(oid: string) { const stored = await this.bucket.get(this.key(oid)); insist(stored, 'object_missing', `Git object ${oid} is missing.`, 404); return decodeObject(new Uint8Array(await stored.arrayBuffer())); }
+    async entries(oid: string): Promise<Entries> {
+        const cached = await this.bucket.get(`${this.project}/trees/${oid}`); if (cached) return JSON.parse(await cached.text());
+        const commit = await this.read(oid); insist(commit.type === 'commit', 'invalid_revision', 'Expected a Git commit.', 400);
+        const tree = /^tree ([a-f0-9]{40})$/m.exec(new TextDecoder().decode(commit.body))?.[1]; insist(tree, 'invalid_commit', 'Commit has no tree.', 400);
+        const result: Entries = Object.create(null); let nodes = 0;
+        const visit = async (hash: string, prefix: string, depth: number) => {
+            insist(depth <= 40 && ++nodes <= 50000, 'tree_capacity', 'Repository tree exceeds import limits.', 413);
+            const data = await this.read(hash); insist(data.type === 'tree', 'invalid_tree', 'Expected a tree object.', 400);
+            for (const entry of parseTree(data.body)) {
+                const path = prefix + entry.name;
+                if (entry.mode === '40000') await visit(entry.oid, path + '/', depth + 1); else result[path] = { oid: entry.oid, mode: entry.mode };
+            }
+        };
+        await visit(tree, '', 0); await this.bucket.put(`${this.project}/trees/${oid}`, JSON.stringify(result)); return result;
+    }
+    async files(oid: string): Promise<Files> {
+        this.key(oid); const snapshot = await this.bucket.get(`${this.project}/snapshots/${oid}`); if (snapshot) return JSON.parse(await snapshot.text());
+        const entries = await this.entries(oid), files: Files = Object.create(null); let bytes = 0;
+        // Non-text, symlink, submodule and large files remain in Git and are preserved by save().
+        for (const [path, entry] of Object.entries(entries)) {
+            if (!['100644', '100755'].includes(entry.mode)) continue;
+            const blob = await this.read(entry.oid); insist(blob.type === 'blob', 'invalid_blob', 'Expected a blob.', 400);
+            if (blob.body.length > 500000 || blob.body.includes(0)) continue;
+            let text; try { text = decoder.decode(blob.body); } catch { continue; }
+            if (bytes + blob.body.length > 12_000_000 || Object.keys(files).length >= 4000) continue;
+            files[path] = text; bytes += blob.body.length;
+        }
+        await this.bucket.put(`${this.project}/snapshots/${oid}`, JSON.stringify(files)); return files;
+    }
+    async save(files: Files, parent: string | undefined, message: string, actor: string) {
+        insist(Object.keys(files).length <= 4000 && Object.values(files).reduce((n, text) => n + utf8.encode(text).length, 0) <= 12_000_000, 'text_capacity', 'Editable snapshot exceeds 4,000 files or 12 MB. Untouched non-editable Git entries are preserved.', 413);
+        let preserved: Entries = Object.create(null);
+        if (parent) {
+            preserved = await this.entries(parent); const before = await this.files(parent);
+            for (const path of Object.keys(before)) if (!(path in files)) delete preserved[path];
+            for (const path of Object.keys(files)) insist(!preserved[path] || path in before, 'unsupported_edit', `${path} is a binary, symlink, submodule or file outside the text editing limits. It is preserved but cannot be edited through this API.`, 400);
+        }
+        const c = await makeCommit(files, parent, message, actor, Date.now(), preserved);
+        for (const obj of c.objects) await this.bucket.put(this.key(obj.oid), deflateSync(obj.raw));
+        await this.bucket.put(`${this.project}/snapshots/${c.oid}`, JSON.stringify(files)); await this.bucket.put(`${this.project}/trees/${c.oid}`, JSON.stringify(c.entries));
+        return { oid: c.oid, meta: { parent, message, actor, at: c.at } };
+    }
+    async gitObject(path: string) { return this.bucket.get(`${this.project}/${path}`); }
+}
