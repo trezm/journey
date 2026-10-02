@@ -33,7 +33,7 @@ export function references(type: string, body: Uint8Array): string[] {
     insist(refs.length && (type !== 'commit' || /^tree [a-f0-9]{40}$/m.test(header)), 'invalid_object', 'Git commit/tag has no valid target.', 400);
     return refs;
 }
-export async function makeCommit(files: Files, parent: string | undefined, message: string, actor: string, at = Date.now(), preserved: Entries = {}) {
+export async function makeCommit(files: Files, parent: string | undefined, message: string, actor: string, at = Date.now(), preserved: Entries = {}, previous?: { entries: Entries; tree: string }) {
     const objects: { oid: string; raw: Uint8Array }[] = [];
     const entries: Entries = Object.assign(Object.create(null), preserved);
     for (const [path, text] of Object.entries(files)) {
@@ -43,26 +43,39 @@ export async function makeCommit(files: Files, parent: string | undefined, messa
         entries[path] = { oid: blob.oid, mode: entries[path]?.mode ?? '100644' };
     }
     type Tree = { [name: string]: Entry | Tree };
-    const root: Tree = Object.create(null);
-    for (const [path, entry] of Object.entries(entries)) {
-        const parts = path.split('/'); let t = root;
-        for (const part of parts.slice(0, -1)) {
-            insist(!t[part] || typeof t[part].oid !== 'string', 'path_collision', 'A path is both a file and a directory.', 400);
-            t[part] ??= Object.create(null); t = t[part] as Tree;
+    function asTree(source: Entries): Tree {
+        const root: Tree = Object.create(null);
+        for (const [path, entry] of Object.entries(source)) {
+            const parts = path.split('/'); let t = root;
+            for (const part of parts.slice(0, -1)) {
+                insist(!t[part] || typeof t[part].oid !== 'string', 'path_collision', 'A path is both a file and a directory.', 400);
+                t[part] ??= Object.create(null); t = t[part] as Tree;
+            }
+            const name = parts.at(-1)!;
+            insist(!t[name] || typeof t[name].oid === 'string', 'path_collision', 'A path is both a file and a directory.', 400); t[name] = entry;
         }
-        const name = parts.at(-1)!;
-        insist(!t[name] || typeof t[name].oid === 'string', 'path_collision', 'A path is both a file and a directory.', 400); t[name] = entry;
+        return root;
     }
-    async function build(t: Tree): Promise<string> {
+    const knownTrees = new Set<string>();
+    async function build(t: Tree, remember = false): Promise<string> {
         const chunks: Uint8Array[] = [];
         const names = Object.keys(t).sort((a, b) => Buffer.compare(Buffer.from(a + (typeof t[a].oid === 'string' ? '' : '/')), Buffer.from(b + (typeof t[b].oid === 'string' ? '' : '/'))));
         for (const name of names) {
-            const v = t[name]; const entry = typeof v.oid === 'string' ? v as Entry : { oid: await build(v as Tree), mode: '40000' };
+            const v = t[name]; const entry = typeof v.oid === 'string' ? v as Entry : { oid: await build(v as Tree, remember), mode: '40000' };
             chunks.push(concatenate(utf8.encode(`${entry.mode} ${name}\0`), Buffer.from(entry.oid, 'hex')));
         }
-        const tree = await object('tree', concatenate(...chunks)); objects.push(tree); return tree.oid;
+        const tree = await object('tree', concatenate(...chunks));
+        if (remember) knownTrees.add(tree.oid);
+        else if (!knownTrees.has(tree.oid)) objects.push(tree);
+        return tree.oid;
     }
-    const tree = await build(root), name = actor.replace(/[\n\r<>]/g, '').slice(0, 80) || 'Agent';
+    if (previous) {
+        // Imported trees can contain empty directories or unusual ordering.
+        // Reconstructed hashes are known to exist only if the root matches.
+        const tree = await build(asTree(previous.entries), true);
+        if (tree !== previous.tree) knownTrees.clear();
+    }
+    const tree = await build(asTree(entries)), name = actor.replace(/[\n\r<>]/g, '').slice(0, 80) || 'Agent';
     const identity = `${name} <agent@journey.local> ${Math.floor(at / 1000)} +0000`;
     const commit = await object('commit', utf8.encode(`tree ${tree}\n${parent ? `parent ${parent}\n` : ''}author ${identity}\ncommitter ${identity}\n\n${message.replace(/\r/g, '')}\n`));
     objects.push(commit); return { oid: commit.oid, objects, files, entries, parent, message, actor, at };
@@ -103,14 +116,28 @@ export class GitStore {
     }
     async save(files: Files, parent: string | undefined, message: string, actor: string) {
         insist(Object.keys(files).length <= 4000 && Object.values(files).reduce((n, text) => n + utf8.encode(text).length, 0) <= 12_000_000, 'text_capacity', 'Editable snapshot exceeds 4,000 files or 12 MB. Untouched non-editable Git entries are preserved.', 413);
-        let preserved: Entries = Object.create(null);
+        let preserved: Entries = Object.create(null), previous: { entries: Entries; tree: string } | undefined;
+        let changed = files;
         if (parent) {
-            preserved = await this.entries(parent); const before = await this.files(parent);
+            const entries = await this.entries(parent), commit = await this.read(parent);
+            insist(commit.type === 'commit', 'invalid_revision', 'Expected a Git commit.', 400);
+            const tree = /^tree ([a-f0-9]{40})$/m.exec(new TextDecoder().decode(commit.body))?.[1];
+            insist(tree, 'invalid_commit', 'Commit has no tree.', 400);
+            previous = { entries, tree }; preserved = Object.assign(Object.create(null), entries);
+            const before = await this.files(parent);
             for (const path of Object.keys(before)) if (!(path in files)) delete preserved[path];
             for (const path of Object.keys(files)) insist(!preserved[path] || path in before, 'unsupported_edit', `${path} is a binary, symlink, submodule or file outside the text editing limits. It is preserved but cannot be edited through this API.`, 400);
+            changed = Object.fromEntries(Object.entries(files).filter(([path, text]) => before[path] !== text));
         }
-        const c = await makeCommit(files, parent, message, actor, Date.now(), preserved);
-        for (const obj of c.objects) await this.bucket.put(this.key(obj.oid), deflateSync(obj.raw));
+        // Git objects are immutable. Reuse unchanged blobs and trees so a small
+        // integration does not rewrite the entire repository before publishing.
+        const c = await makeCommit(changed, parent, message, actor, Date.now(), preserved, previous);
+        const objects = [...new Map(c.objects.map(obj => [obj.oid, obj])).values()];
+        for (let start = 0; start < objects.length; start += 4) {
+            // Settle each batch before throwing, leaving no request I/O running.
+            const writes = await Promise.allSettled(objects.slice(start, start + 4).map(obj => this.bucket.put(this.key(obj.oid), deflateSync(obj.raw))));
+            for (const write of writes) if (write.status === 'rejected') throw write.reason;
+        }
         await this.bucket.put(`${this.project}/snapshots/${c.oid}`, JSON.stringify(files)); await this.bucket.put(`${this.project}/trees/${c.oid}`, JSON.stringify(c.entries));
         return { oid: c.oid, meta: { parent, message, actor, at: c.at } };
     }
