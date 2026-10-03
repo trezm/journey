@@ -16,19 +16,25 @@ function accepted(s, id, journey = 'other') {
 }
 const code = expected => error => error.code === expected;
 
-test('published work can be submitted after all editing leases expire', () => {
+test('expired editing scopes must be reacquired before submission can retain valid grants', () => {
     const { s, j } = fixture('working');
     acquire(s, j, 'step', [{ path: 'file', start: 1, end: 1, whole: true }], j.head, { file: 'published' }, {}, 'agent', 0);
     expire(s, 600001);
     assert.equal(s.leases.length, 0);
-    assert.deepEqual(submitForReview(s, j, 'published', 'agent'), { revision: 'published' });
+    assert.throws(() => submitForReview(s, j, 'published', 'agent', undefined, 600001), code('locks_required'));
+    assert.equal(j.status, 'working');
+    assert.equal(j.posted, undefined);
+    const grant = acquire(s, j, 'step', [{ path: 'file', start: 1, end: 1, whole: true }], j.head, { file: 'published' }, {}, 'agent', 600002);
+    const tokens = grant.locks.map(l => l.token);
+    assert.deepEqual(submitForReview(s, j, 'published', 'agent', tokens, 600003), { revision: 'published' });
     assert.equal(j.status, 'review');
-    assert.equal(s.events.at(-1).type, 'review.requested');
-    assert.throws(() => checkTokens(s, j, [], 600001), code('locks_required'));
-    assert.throws(() => recordPatch(s, j, 'step', { file: 'edited' }, { file: 'published' }, 'new', 'Edit', 'agent', [], 600001), code('locks_required'));
+    assert.equal(j.posted, true);
+    assert.equal(s.leases[0].retained, true);
+    expire(s, 6000020);
+    assert.equal(checkTokens(s, j, tokens, 6000020).length, 1);
 });
 
-test('lease-free submission still validates exact revision, published patch, manifest, reconciliation and reviews', () => {
+test('submission still validates exact revision, published patch, manifest, reconciliation and reviews', () => {
     for (const [change, expected] of [
         [({ j }) => { j.head = 'changed'; }, 'stale_revision'],
         [({ j }) => { j.changesets[0].patches = []; }, 'empty_journey'],

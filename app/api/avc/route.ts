@@ -3,7 +3,7 @@ import { authorize, sameOrigin, digest, token } from '@/lib/avc/auth';
 import { GitStore } from '@/lib/avc/git';
 import { type State, type Files, type Journey, type BreakingChange, ProtocolError, insist, emit, getJourney, activeJourney, acquire, recordPatch, checkTokens, validateSubmission, finalizeIntegration, mergeFiles, remap, diff, publicState, notifyWaiters, pendingIntegrations, expire, updatePolicy, approvalAuthority, validateIntegrationAuthority, approvalInbox } from '@/lib/avc/core';
 export const dynamic = 'force-dynamic';
-import { submitForReview, reconciliationPlan, recordReconciliation } from '@/lib/avc/core';
+import { submitForReview, reconciliationPlan, recordReconciliation, leaseActive, normalizePostedLocks } from '@/lib/avc/core';
 import { integrationFiles } from '@/lib/avc/integration';
 const sample: Files = { 'src/users.rs': 'pub struct User {\n    pub id: u64,\n    pub name: String,\n}\n\npub fn find_user(id: u64) -> Option<User> {\n    if id == 1 {\n        Some(User { id, name: "Ada".into() })\n    } else {\n        None\n    }\n}\n\npub fn display_name(user: &User) -> String {\n    user.name.clone()\n}\n', 'Cargo.toml': '[package]\nname = "journey-demo"\nversion = "0.1.0"\nedition = "2021"\n\n[lib]\npath = "src/users.rs"\n', 'README.md': '# Journey demo\n\nA small Rust library for trying concurrent range locks and recorded changesets.\n\nRun cargo test locally. CI is optional.\n' };
 const field = (v: unknown, name: string, max = 4000) => { insist(typeof v === 'string' && v.trim().length > 0 && v.length <= max, 'invalid_input', `${name} is required (maximum ${max} characters).`, 400); return v.trim(); };
@@ -23,7 +23,7 @@ export async function GET(req: Request) {
             return Response.json({ projects: rows.results, user });
         }
         let row = await readProject(id);
-        if (row.state.leases.some(l => l.expires <= Date.now())) {
+        if (normalizePostedLocks(row.state) || row.state.leases.some(l => !leaseActive(l))) {
             await mutate(id, () => null);
             row = await readProject(id);
         }
@@ -151,7 +151,7 @@ export async function POST(req: Request) {
                         insist(Array.isArray(b.tokens) && b.tokens.length, 'tokens_required', 'Supply lock tokens.', 400);
                         const held = s.leases.filter(l => l.journey === j.id && b.tokens.includes(l.token));
                         insist(held.length === new Set(b.tokens).size, 'invalid_lease', 'A lock expired or the token is invalid.');
-                        held.forEach(l => l.expires = Date.now() + 600000);
+                        held.forEach(l => { if (!l.retained) l.expires = Date.now() + 600000; });
                         result = { locks: held };
                         break;
                     }
@@ -187,7 +187,13 @@ export async function POST(req: Request) {
                         break;
                     }
                     case 'submit': {
-                        result = submitForReview(s, j, b.revision, user.id);
+                        insist(b.revision === j.head, 'stale_revision', 'Submit the current journey revision.');
+                        validateSubmission(s, j);
+                        const canonical = await git.files(s.head), base = await git.files(j.base), ours = await git.files(j.head);
+                        const tokens = b.tokens ?? s.leases.filter(l => l.journey === j.id).map(l => l.token);
+                        const now = Date.now();
+                        integrationFiles(s, j, canonical, base, ours, tokens, now);
+                        result = submitForReview(s, j, b.revision, user.id, tokens, now);
                         break;
                     }
                     case 'review': {
@@ -242,7 +248,7 @@ export async function POST(req: Request) {
                     case 'integrate': {
                         insist(j.status === 'review', 'not_in_review', 'Submit the journey for review first.');
                         insist(b.revision === j.head && b.head === s.head && b.cursor === s.integrationCursor, 'stale_integration', 'The candidate or integration head changed.');
-                        if (user.agent) checkTokens(s, j, b.tokens ?? []);
+                        checkTokens(s, j, b.tokens ?? []);
                         validateSubmission(s, j);
                         validateIntegrationAuthority(s, j, user);
                         break;
@@ -261,7 +267,7 @@ export async function POST(req: Request) {
                 // Integration validates the final diff against canonical lock coordinates before atomically advancing the state.
                 if (action === 'integrate') {
                     const canonical = await git.files(s.head), base = await git.files(j.base), ours = await git.files(j.head);
-                    const merged = integrationFiles(s, j, canonical, base, ours, b.tokens ?? [], !user.agent);
+                    const merged = integrationFiles(s, j, canonical, base, ours, b.tokens ?? []);
                     const c = await git.save(merged, s.head, j.title, user.name);
                     s.revisions[c.oid] = c.meta;
                     const e = finalizeIntegration(s, j, c.oid, user.id, canonical, merged);

@@ -25,7 +25,7 @@ const act = (action, body = {}, credential = worker.token, expected = 200, code)
 const state = async () => (await request(`/api/avc?project=${project}`)).state;
 
 const initial = await state();
-const { journey } = await act('create_journey', { title: 'Owner accepts approved worker code without editing tokens' });
+const { journey } = await act('create_journey', { title: 'Owner accepts approved worker code with retained published scopes' });
 const { changeset } = await act('create_changeset', { journey, description: 'Insert a disjoint prefix' });
 const grant = await act('acquire', { journey, changeset, revision: initial.head, scopes: [{ path: 'file.txt', start: 1, end: 1 }] });
 assert.equal(grant.queued, false);
@@ -39,13 +39,13 @@ const { journey: protectedJourney } = await act('create_journey', { title: 'Keep
 const { changeset: protectedStep } = await act('create_changeset', { journey: protectedJourney, description: 'Reserve middle lines' }, other.token);
 const protectedGrant = await act('acquire', { journey: protectedJourney, changeset: protectedStep, revision: initial.head, scopes: [{ path: 'file.txt', start: 3, end: 4 }] }, other.token);
 assert.equal(protectedGrant.queued, false);
-const payload = { action: 'integrate', project, requestId: crypto.randomUUID(), journey, revision: patched.revision, head: initial.head, cursor: initial.integrationCursor };
-await request('/api/avc', { ...payload, owner: true, agent: false, user: { agent: false } }, worker.token, 409, 'invalid_lease');
+const payload = { tokens, action: 'integrate', project, requestId: crypto.randomUUID(), journey, revision: patched.revision, head: initial.head, cursor: initial.integrationCursor };
+await request('/api/avc', { ...payload, tokens: [], owner: true, agent: false, user: { agent: false } }, worker.token, 409, 'invalid_lease');
 await request('/api/avc', { ...payload, tokens }, other.token, 403, 'forbidden');
 await request('/api/avc', { ...payload, requestId: crypto.randomUUID(), head: 'stale' }, null, 409, 'stale_integration');
 await request('/api/avc', { ...payload, requestId: crypto.randomUUID(), revision: 'stale' }, null, 409, 'stale_integration');
 await request('/api/avc', { ...payload, requestId: crypto.randomUUID(), cursor: initial.integrationCursor + 1 }, null, 409, 'stale_integration');
-const accepted = await request('/api/avc', payload); // Owner sends no editing tokens.
+const accepted = await request('/api/avc', payload); // Owner returns the retained scope tokens.
 const after = await state();
 assert.equal(after.head, accepted.revision);
 assert.equal(after.journeys.find(j => j.id === journey).status, 'integrated');
@@ -59,7 +59,7 @@ assert.equal((await state()).sequence, after.sequence);
 await request('/api/avc', { ...payload, cursor: payload.cursor + 1 }, null, 409, 'idempotency_conflict');
 await act('abandon', { journey: protectedJourney }, other.token);
 
-// An unrelated signed-in account cannot use the owner's tokenless integration authority.
+// An unrelated signed-in account cannot use the owner's integration authority.
 cookie = '';
 await request('/api/auth', { action: 'register', email: `stranger-integration-${crypto.randomUUID()}@example.com`, password: 'local-stranger-integration-2026' });
 await request('/api/avc', { ...payload, requestId: crypto.randomUUID() }, null, 403, 'forbidden');
@@ -73,7 +73,7 @@ const whole = await act('acquire', { journey: blocked, changeset: blockedStep, r
 const blockedPatch = await act('patch', { journey: blocked, changeset: blockedStep, revision: current.head, tokens: whole.locks.map(l => l.token), description: 'Publish empty text file', edits: [{ path: 'empty.txt', content: '' }] });
 await act('declare_breaking', { journey: blocked, changes: [] });
 await act('submit', { journey: blocked, revision: blockedPatch.revision });
-const blockedPayload = { journey: blocked, revision: blockedPatch.revision, head: current.head, cursor: current.integrationCursor };
+const blockedPayload = { tokens: whole.locks.map(l => l.token), journey: blocked, revision: blockedPatch.revision, head: current.head, cursor: current.integrationCursor };
 await act('integrate', blockedPayload, null, 409, 'approval_required');
 const requested = await act('review', { journey: blocked, revision: blockedPatch.revision, kind: 'request_changes', body: 'Resolve before integrating' }, null);
 await act('integrate', blockedPayload, null, 409, 'changes_requested');
@@ -81,4 +81,4 @@ await act('resolve_review', { journey: blocked, review: requested.review });
 await act('review', { journey: blocked, revision: blockedPatch.revision, kind: 'approve', body: 'Exact empty file candidate accepted' }, null);
 await act('integrate', blockedPayload, null);
 assert.equal((await state()).journeys.find(j => j.id === blocked).status, 'integrated');
-console.log('Owner integration API smoke passed: tokenless owner acceptance, worker and foreign-account isolation, exact review/head/cursor requirements, disjoint lease remapping, empty-file creation, receipt replay and payload-conflict rejection.');
+console.log('Owner integration API smoke passed: owner acceptance with retained scopes, worker and foreign-account isolation, exact review/head/cursor requirements, disjoint lease remapping, empty-file creation, receipt replay and payload-conflict rejection.');

@@ -6,6 +6,7 @@ const headers = { Authorization: `Bearer ${token}`, ...(process.env.AVC_SITE_SER
 const [command, ...args] = process.argv.slice(2);
 const say = data => console.log(JSON.stringify(data, null, 2));
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+const currentLeases = (state, journey, now = Date.now()) => state.leases.filter(l => l.journey === journey && l.token && (l.retained || l.expires > now));
 async function get(query = {}) { const url = new URL(root + '/api/avc'); url.search = new URLSearchParams({ project, ...query }).toString(); const res = await fetch(url, { headers }); const data = await res.json(); if (!res.ok) throw new Error(data.error); return data; }
 async function post(body) {
     const request = { project, requestId: crypto.randomUUID(), ...body }, payload = JSON.stringify(request);
@@ -41,9 +42,19 @@ try {
             cursor = String(data.cursor); await sleep(3000);
         }
     } else if (command === 'keepalive') {
-        for (;;) { const { state } = await get(); const tokens = state.leases.filter(l => l.journey === args[0] && l.token).map(l => l.token); if (!tokens.length) throw new Error('No current leases remain; reacquire before publishing.'); console.log(JSON.stringify(await post({ action: 'refresh', journey: args[0], tokens }))); await sleep(60000); }
+        for (;;) {
+            const { state } = await get(), journey = state.journeys.find(j => j.id === args[0]);
+            if (!journey) throw new Error('Journey not found.');
+            if (['integrated', 'abandoned'].includes(journey.status)) break;
+            const leases = currentLeases(state, journey.id);
+            if (!leases.length) throw new Error('No current locks remain; reacquire before publishing. Posting does not restore expired locks.');
+            const tokens = leases.filter(l => !l.retained).map(l => l.token);
+            if (!tokens.length) { say({ journey: journey.id, retained: leases.length, message: 'Locks are held until integration or abandonment; no keepalive is needed. Use poll to monitor the inbox.' }); break; }
+            say(await post({ action: 'refresh', journey: journey.id, tokens }));
+            await sleep(60000);
+        }
     } else if (command === 'record') { const body = JSON.parse(await readFile(args[1], 'utf8')); say(await post({ ...body, action: 'record', journey: args[0] })); }
     else if (command === 'request') { const body = JSON.parse(await readFile(args[0], 'utf8')); say(await post(body)); }
-    else if (command === 'patch') { const [journey, changeset, path, file, description] = args; const { state } = await get(), j = state.journeys.find(j => j.id === journey); if (!j) throw new Error('Journey not found.'); say(await post({ action: 'patch', journey, changeset, revision: j.head, description, edits: [{ path, content: await readFile(file, 'utf8') }], tokens: state.leases.filter(l => l.journey === journey && l.token).map(l => l.token) })); }
+    else if (command === 'patch') { const [journey, changeset, path, file, description] = args; const { state } = await get(), j = state.journeys.find(j => j.id === journey); if (!j) throw new Error('Journey not found.'); say(await post({ action: 'patch', journey, changeset, revision: j.head, description, edits: [{ path, content: await readFile(file, 'utf8') }], tokens: currentLeases(state, journey).map(l => l.token) })); }
     else throw new Error('Commands: record <journey> <json-file> | state | request <json-file> | inbox <journey> [cursor] | poll <journey> [cursor] | approvals [cursor] | poll-approvals [cursor] | approve <journey> <exact-revision> [description] | keepalive <journey> | patch <journey> <changeset> <repo-path> <local-file> <description>');
 } catch (e) { process.stderr.write(e.message + '\n'); process.exit(1); }

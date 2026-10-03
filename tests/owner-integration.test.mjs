@@ -6,17 +6,17 @@ import { acquire, finalizeIntegration } from '../lib/avc/core.ts';
 const now = 1000;
 function fixture() {
     const j = { id: 'worker', title: 'Approved work', actor: 'agent', status: 'review', base: 'base', head: 'published', reconciledHead: 'base', reconciledCursor: 0, changesets: [{ id: 'step', patches: [{}] }], manifest: [], manifestDeclared: true, reviews: [{ id: 'approval', kind: 'approve', revision: 'published' }], dispositions: {}, created: 0 };
-    const s = { id: 'repo', head: 'base', integrationCursor: 0, journeys: [j], leases: [], waiting: [], events: [], sequence: 0, generation: 0, receipts: {}, revisions: {}, requireApproval: true };
+    const s = { id: 'repo', head: 'base', integrationCursor: 0, journeys: [j], leases: [lease('worker', 'file.txt', 0, 100, { whole: true })], waiting: [], events: [], sequence: 0, generation: 0, receipts: {}, revisions: {}, requireApproval: true };
     return { s, j };
 }
 const lease = (journey, path, start = 0, end = 1, extra = {}) => ({ id: 'lock', token: 'current', generation: 1, journey, changeset: 'step', revision: 'published', path, start: start + 1, end, canonicalStart: start, canonicalEnd: end, expires: now + 1000, ...extra });
 const code = expected => error => error.code === expected;
 
-test('the owner integrates published work without missing, expired, or returned editing tokens', () => {
-    for (const leases of [[], [lease('worker', 'file.txt', 0, 1, { expires: now - 1 })], [lease('worker', 'other.txt')]]) {
+test('integration requires current complete tokens for all callers', () => {
+    for (const [leases, tokens, expected] of [[[], [], 'locks_required'], [[lease('worker', 'file.txt', 0, 1, { expires: now - 1 })], ['current'], 'invalid_lease'], [[lease('worker', 'other.txt')], ['current'], 'lock_coverage']]) {
         const { s, j } = fixture();
         s.leases = leases;
-        assert.deepEqual({ ...integrationFiles(s, j, { 'file.txt': 'before' }, { 'file.txt': 'before' }, { 'file.txt': 'after' }, [], true, now) }, { 'file.txt': 'after' });
+        assert.throws(() => integrationFiles(s, j, { 'file.txt': 'before' }, { 'file.txt': 'before' }, { 'file.txt': 'after' }, tokens, now), code(expected));
     }
 });
 
@@ -24,7 +24,7 @@ test('worker integration still requires every valid current editing token', () =
     for (const [leases, tokens, expected] of [[[], [], 'locks_required'], [[lease('worker', 'file.txt')], [], 'invalid_lease'], [[lease('worker', 'file.txt', 0, 1, { expires: now })], ['current'], 'invalid_lease'], [[lease('worker', 'file.txt'), lease('worker', 'other.txt', 0, 1, { token: 'second' })], ['current'], 'invalid_lease']]) {
         const { s, j } = fixture();
         s.leases = leases;
-        assert.throws(() => integrationFiles(s, j, { 'file.txt': 'before' }, { 'file.txt': 'before' }, { 'file.txt': 'after' }, tokens, false, now), code(expected));
+        assert.throws(() => integrationFiles(s, j, { 'file.txt': 'before' }, { 'file.txt': 'before' }, { 'file.txt': 'after' }, tokens, now), code(expected));
     }
 });
 
@@ -32,9 +32,9 @@ test('workers need whole-file coverage for creation and deletion, including empt
     for (const [base, ours] of [[{}, { 'file.txt': '' }], [{ 'file.txt': '' }, {}], [{ 'file.txt': 'before' }, {}]]) {
         const { s, j } = fixture();
         s.leases = [lease('worker', 'file.txt')];
-        assert.throws(() => integrationFiles(s, j, base, base, ours, ['current'], false, now), code('whole_file_required'));
+        assert.throws(() => integrationFiles(s, j, base, base, ours, ['current'], now), code('whole_file_required'));
         s.leases[0].whole = true;
-        assert.deepEqual({ ...integrationFiles(s, j, base, base, ours, ['current'], false, now) }, ours);
+        assert.deepEqual({ ...integrationFiles(s, j, base, base, ours, ['current'], now) }, ours);
     }
 });
 
@@ -42,17 +42,17 @@ test('worker final coverage remains tied to canonical ranges after intervening c
     const { s, j } = fixture();
     const base = { 'file.txt': 'a\nb\nc' }, canonical = { 'file.txt': 'prefix\na\nb\nc' }, ours = { 'file.txt': 'a\nB\nc' };
     s.leases = [lease('worker', 'file.txt', 1, 2)];
-    assert.throws(() => integrationFiles(s, j, canonical, base, ours, ['current'], false, now), code('lock_coverage'));
+    assert.throws(() => integrationFiles(s, j, canonical, base, ours, ['current'], now), code('lock_coverage'));
     s.leases[0].canonicalStart = 2;
     s.leases[0].canonicalEnd = 3;
-    assert.equal(integrationFiles(s, j, canonical, base, ours, ['current'], false, now)['file.txt'], 'prefix\na\nB\nc');
+    assert.equal(integrationFiles(s, j, canonical, base, ours, ['current'], now)['file.txt'], 'prefix\na\nB\nc');
 });
 
 test('both owners and workers respect other active whole-file reservations before integration', () => {
     for (const owner of [true, false]) {
         const { s, j } = fixture();
         s.leases = [lease('worker', 'file.txt', 0, 3, { whole: true }), lease('other', 'file.txt', 99, 100, { whole: true })];
-        assert.throws(() => integrationFiles(s, j, { 'file.txt': 'a\nb\nc' }, { 'file.txt': 'a\nb\nc' }, { 'file.txt': 'A\nb\nc' }, ['current'], owner, now), error => {
+        assert.throws(() => integrationFiles(s, j, { 'file.txt': 'a\nb\nc' }, { 'file.txt': 'a\nb\nc' }, { 'file.txt': 'A\nb\nc' }, ['current'], now), error => {
             assert.equal(error.code, 'integration_lock_conflict');
             assert.deepEqual(error.details, { path: 'file.txt', journey: 'other', lockId: 'lock' });
             assert.equal(JSON.stringify(error.details).includes('current'), false);
@@ -64,57 +64,57 @@ test('both owners and workers respect other active whole-file reservations befor
 test('creation or deletion conflicts with any other active lease, even when empty text has no hunks', () => {
     for (const [before, after] of [[{}, { 'file.txt': '' }], [{ 'file.txt': '' }, {}], [{ 'file.txt': 'a\nb\nc' }, {}]]) {
         const { s, j } = fixture();
-        s.leases = [lease('other', 'file.txt', 99, 100)];
-        assert.throws(() => integrationFiles(s, j, before, before, after, [], true, now), code('integration_lock_conflict'));
+        s.leases = [lease('worker', 'file.txt', 0, 100, { whole: true }), lease('other', 'file.txt', 99, 100)];
+        assert.throws(() => integrationFiles(s, j, before, before, after, ['current'], now), code('integration_lock_conflict'));
     }
 });
 
 test('replacement and deletion overlapping another canonical range are rejected', () => {
     for (const content of ['a\nB\nc\nd', 'a\nc\nd']) {
         const { s, j } = fixture();
-        s.leases = [lease('other', 'file.txt', 1, 2)];
-        assert.throws(() => integrationFiles(s, j, { 'file.txt': 'a\nb\nc\nd' }, { 'file.txt': 'a\nb\nc\nd' }, { 'file.txt': content }, [], true, now), code('integration_lock_conflict'));
+        s.leases = [lease('worker', 'file.txt', 0, 100, { whole: true }), lease('other', 'file.txt', 1, 2)];
+        assert.throws(() => integrationFiles(s, j, { 'file.txt': 'a\nb\nc\nd' }, { 'file.txt': 'a\nb\nc\nd' }, { 'file.txt': content }, ['current'], now), code('integration_lock_conflict'));
     }
 });
 
 test('insertions at either boundary or inside another canonical lease are rejected', () => {
     for (const content of ['a\ninserted\nb\nc\nd', 'a\nb\ninserted\nc\nd', 'a\nb\nc\ninserted\nd']) {
         const { s, j } = fixture();
-        s.leases = [lease('other', 'file.txt', 1, 3)];
-        assert.throws(() => integrationFiles(s, j, { 'file.txt': 'a\nb\nc\nd' }, { 'file.txt': 'a\nb\nc\nd' }, { 'file.txt': content }, [], true, now), code('integration_lock_conflict'));
+        s.leases = [lease('worker', 'file.txt', 0, 100, { whole: true }), lease('other', 'file.txt', 1, 3)];
+        assert.throws(() => integrationFiles(s, j, { 'file.txt': 'a\nb\nc\nd' }, { 'file.txt': 'a\nb\nc\nd' }, { 'file.txt': content }, ['current'], now), code('integration_lock_conflict'));
     }
 });
 
 test('adjacent replacements are allowed without widening another reservation', () => {
     for (const content of ['A\nb\nc', 'a\nb\nC']) {
         const { s, j } = fixture();
-        s.leases = [lease('other', 'file.txt', 1, 2)];
-        assert.equal(integrationFiles(s, j, { 'file.txt': 'a\nb\nc' }, { 'file.txt': 'a\nb\nc' }, { 'file.txt': content }, [], true, now)['file.txt'], content);
+        s.leases = [lease('worker', 'file.txt', 0, 100, { whole: true }), lease('other', 'file.txt', 1, 2)];
+        assert.equal(integrationFiles(s, j, { 'file.txt': 'a\nb\nc' }, { 'file.txt': 'a\nb\nc' }, { 'file.txt': content }, ['current'], now)['file.txt'], content);
     }
 });
 
 test('only canonical-to-merged changes are tested against canonical lock coordinates', () => {
     const { s, j } = fixture();
     const base = { 'file.txt': 'a\nb\nc\nd' }, canonical = { 'file.txt': 'prefix\na\nb\nc\nd' }, ours = { 'file.txt': 'a\nb\nC\nd' };
-    s.leases = [lease('other', 'file.txt', 3, 4)];
-    assert.throws(() => integrationFiles(s, j, canonical, base, ours, [], true, now), code('integration_lock_conflict'));
-    s.leases[0].canonicalStart = 2;
-    s.leases[0].canonicalEnd = 3;
-    assert.equal(integrationFiles(s, j, canonical, base, ours, [], true, now)['file.txt'], 'prefix\na\nb\nC\nd');
+    s.leases = [lease('worker', 'file.txt', 0, 100, { whole: true }), lease('other', 'file.txt', 3, 4)];
+    assert.throws(() => integrationFiles(s, j, canonical, base, ours, ['current'], now), code('integration_lock_conflict'));
+    s.leases[1].canonicalStart = 2;
+    s.leases[1].canonicalEnd = 3;
+    assert.equal(integrationFiles(s, j, canonical, base, ours, ['current'], now)['file.txt'], 'prefix\na\nb\nC\nd');
 });
 
 test('expired, own, unrelated, and unchanged reservations do not block owner integration', () => {
     const { s, j } = fixture();
     const base = { 'file.txt': 'a', 'same.txt': 'unchanged' }, ours = { 'file.txt': 'A', 'same.txt': 'unchanged' };
     s.leases = [lease('worker', 'file.txt', 0, 1, { whole: true }), lease('other', 'file.txt', 0, 1, { expires: now }), lease('other', 'same.txt', 0, 1, { whole: true }), lease('other', 'unrelated.txt', 0, 1, { whole: true })];
-    assert.deepEqual({ ...integrationFiles(s, j, base, base, ours, [], true, now) }, ours);
+    assert.deepEqual({ ...integrationFiles(s, j, base, base, ours, ['current'], now) }, ours);
 });
 
 test('a disjoint insertion is integrated and remaps the other journey canonical lease', () => {
     const { s, j } = fixture();
     const base = { 'file.txt': 'a\nb\nc\nd' }, ours = { 'file.txt': 'prefix\na\nb\nc\nd' };
-    s.leases = [lease('other', 'file.txt', 2, 3)];
-    const merged = integrationFiles(s, j, base, base, ours, [], true, now);
+    s.leases = [lease('worker', 'file.txt', 0, 100, { whole: true }), lease('other', 'file.txt', 2, 3)];
+    const merged = integrationFiles(s, j, base, base, ours, ['current'], now);
     finalizeIntegration(s, j, 'accepted', 'owner', base, merged);
     assert.equal(s.head, 'accepted');
     assert.equal(j.status, 'integrated');
@@ -128,18 +128,19 @@ test('actual acquisition reservations protect new files until their other journe
     s.journeys.push(other);
     const grant = acquire(s, other, 'second-step', [{ path: 'empty.txt', start: 1, end: 1, whole: true }], 'base', {}, {}, 'second', now);
     assert.equal(grant.queued, false);
-    assert.throws(() => integrationFiles(s, j, {}, {}, { 'empty.txt': '' }, [], true, now), code('integration_lock_conflict'));
+    s.leases.push(lease('worker', 'empty.txt', 0, 1, { whole: true }));
+    assert.throws(() => integrationFiles(s, j, {}, {}, { 'empty.txt': '' }, ['current'], now), code('integration_lock_conflict'));
 });
 
 test('merge ambiguity is still rejected and validation cannot mutate repository state', () => {
     const { s, j } = fixture();
     const before = structuredClone(s);
-    assert.throws(() => integrationFiles(s, j, { 'file.txt': 'canonical' }, { 'file.txt': 'base' }, { 'file.txt': 'ours' }, [], true, now), code('ambiguous_range'));
+    assert.throws(() => integrationFiles(s, j, { 'file.txt': 'canonical' }, { 'file.txt': 'base' }, { 'file.txt': 'ours' }, ['current'], now), code('ambiguous_range'));
     assert.deepEqual(s, before);
 });
 
 // Exercise the actual route, authorization, and CAS storage using disposable in-memory bindings.
-test('owner route retains all 29 authorization, review, reservation, and idempotent CAS scenarios', async t => {
+test('integration retains all 29 authorization, review, reservation, and idempotent CAS scenarios', async t => {
     const { registerHooks } = await import('node:module');
     const { pathToFileURL, fileURLToPath } = await import('node:url');
     const { createHash } = await import('node:crypto');
@@ -223,12 +224,21 @@ test('owner route retains all 29 authorization, review, reservation, and idempot
       await f.act('review',{journey,revision:patch.revision,kind:'approve'},ownerCookie);
       return {journey,revision:patch.revision,tokens};
     }
-    const integration = (f,c,extra={}) => ({action:'integrate',project:f.project,requestId:crypto.randomUUID(),journey:c.journey,revision:c.revision,head:read(f.project).head,cursor:read(f.project).integrationCursor,...extra});
+    const integration = (f,c,extra={}) => ({action:'integrate',project:f.project,requestId:crypto.randomUUID(),journey:c.journey,revision:c.revision,head:read(f.project).head,cursor:read(f.project).integrationCursor,tokens:c.tokens,...extra});
     const assertions = [];
     for (const leaseCase of ['zero','expired','own-live']) {
       const f=await fixture(leaseCase), c=await candidate(f);
       update(f.project,s=> { if (leaseCase === 'zero') s.leases=[]; if (leaseCase === 'expired') s.leases.forEach(l=>l.expires=Date.now()-1); });
-      const before = read(f.project), payload = integration(f,c);
+      let payload = integration(f,c);
+      if (leaseCase === 'zero') {
+        await request(payload,ownerCookie,409,'locks_required');
+        const current=read(f.project).journeys.find(j=>j.id===c.journey);
+        const grant=await f.act('acquire',{journey:c.journey,changeset:current.changesets[0].id,revision:current.head,scopes:[{path:'f.txt',start:1,end:1,whole:true}]});
+        assert.equal(grant.queued,false);
+        assert.equal(grant.locks[0].retained,true);
+        c.tokens=grant.locks.map(l=>l.token);
+        payload=integration(f,c);
+      }
       const result = await request(payload);
       const after = read(f.project);
       assert.equal(after.journeys[0].status,'integrated');
@@ -259,7 +269,7 @@ test('owner route retains all 29 authorization, review, reservation, and idempot
       ['worker expired leases','expired','locks_required'],
     ]) {
       const f=await fixture(label),c=await candidate(f);
-      if (caseKind==='expired') update(f.project,s=>s.leases.forEach(l=>l.expires=Date.now()-1));
+      if (caseKind==='expired') update(f.project,s=>s.leases.forEach(l=>{l.retained=false;l.expires=Date.now()-1;}));
       const tokens=caseKind==='valid' || caseKind==='expired' ? c.tokens : caseKind==='stale' ? ['superseded'] : [];
       const before=read(f.project),payload=integration(f,c,{tokens});
       await request(payload,f.worker.token,code ? 409 : 200,code);
@@ -267,7 +277,7 @@ test('owner route retains all 29 authorization, review, reservation, and idempot
       else assert.equal(read(f.project).journeys[0].status,'integrated');
       assertions.push(label);
     }
-    // Each validation gate is tested with zero leases to ensure owner bypass is strictly limited to leases.
+    // Strict lease checks preserve all existing exact-review and canonical-state gates.
     for (const [label,mutate,body,code] of [
       ['stale candidate',null,{revision:'old'},'stale_integration'],
       ['stale main',null,{head:'old'},'stale_integration'],
@@ -279,7 +289,7 @@ test('owner route retains all 29 authorization, review, reservation, and idempot
       ['old approval',s=>s.journeys[0].reviews.forEach(r=>r.revision='old'),{},'approval_required'],
       ['resolved approval',s=>s.journeys[0].reviews.forEach(r=>r.resolved=true),{},'approval_required'],
     ]) {
-      const f=await fixture(label),c=await candidate(f); update(f.project,s=> {s.leases=[]; mutate?.(s);});
+      const f=await fixture(label),c=await candidate(f); update(f.project,s=> {mutate?.(s);});
       const before=read(f.project), commits=db.commits;
       await request(integration(f,c,body),ownerCookie,409,code);
       assert.deepEqual(read(f.project),before); assert.equal(db.commits,commits);
@@ -297,11 +307,14 @@ test('owner route retains all 29 authorization, review, reservation, and idempot
       ['delete empty file','empty.txt',null,{path:'empty.txt',start:1,end:1},true],
       ['delete nonempty file','f.txt',null,{path:'f.txt',start:6,end:6},true],
     ]) {
-      const f=await fixture(label),c=await candidate(f,path,content);update(f.project,s=>s.leases=[]);
+      const f=await fixture(label),c=await candidate(f,path,content);
+      const own=read(f.project).leases.filter(l=>l.journey===c.journey);
+      update(f.project,s=>s.leases=[]);
       const {journey}=await f.act('create_journey',{title:'Protected other Journey'},f.other.token);
       const {changeset}=await f.act('create_changeset',{journey,description:'Protected work'},f.other.token);
       const grant=await f.act('acquire',{journey,changeset,revision:read(f.project).head,scopes:[scope]},f.other.token);
       assert.equal(grant.queued,false);
+      update(f.project,s=>s.leases.push(...own));
       const before=read(f.project),payload=integration(f,c);
       await request(payload,ownerCookie,blocked ? 409 : 200,blocked ? 'integration_lock_conflict' : undefined);
       const after=read(f.project);
@@ -318,7 +331,7 @@ test('owner route retains all 29 authorization, review, reservation, and idempot
     }
     // Simultaneous identical requests race through Git I/O, but commit exactly one receipt/event in state.
     {
-      const f=await fixture('Concurrent exact receipt'),c=await candidate(f);update(f.project,s=>s.leases=[]);
+      const f=await fixture('Concurrent exact receipt'),c=await candidate(f);
       const payload=integration(f,c);let competing;
       git.beforeSave=async()=>{competing=await request(payload);};
       const response=await request(payload);
@@ -328,16 +341,16 @@ test('owner route retains all 29 authorization, review, reservation, and idempot
     }
     // An overlapping lock arriving after preflight but during Git I/O must force a fresh check on CAS retry.
     {
-      const f=await fixture('CAS conflict safety'),c=await candidate(f); update(f.project,s=>s.leases=[]);
+      const f=await fixture('CAS conflict safety'),c=await candidate(f);
       const payload=integration(f,c);
       git.beforeSave=()=>update(f.project,s=>s.leases.push({id:'race-lock',token:'do-not-leak',journey:'other-journey',changeset:'other',path:'f.txt',start:2,end:2,canonicalStart:1,canonicalEnd:2,revision:s.head,expires:Date.now()+600000,generation:2}));
       await request(payload,ownerCookie,409,'integration_lock_conflict');
-      const s=read(f.project); assert.equal(s.journeys[0].status,'review');assert.equal(s.head,payload.head);assert.equal(s.events.filter(e=>e.type==='journey.integrated').length,0);assert.equal(s.leases.length,1);
+      const s=read(f.project); assert.equal(s.journeys[0].status,'review');assert.equal(s.head,payload.head);assert.equal(s.events.filter(e=>e.type==='journey.integrated').length,0);assert.equal(s.leases.length,2);
       assertions.push('CAS retry rejects new conflicting lock without advancing main');
     }
     // A competing advance of canonical main also invalidates the exact originally submitted request on retry.
     {
-      const f=await fixture('CAS head safety'),c=await candidate(f);update(f.project,s=>s.leases=[]);
+      const f=await fixture('CAS head safety'),c=await candidate(f);
       const payload=integration(f,c);
       git.beforeSave=()=>update(f.project,s=>{s.head='competing-main';s.integrationCursor=100;});
       await request(payload,ownerCookie,409,'stale_integration');
