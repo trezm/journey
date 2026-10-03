@@ -3,6 +3,7 @@ import { authorize, sameOrigin, digest, token } from '@/lib/avc/auth';
 import { GitStore } from '@/lib/avc/git';
 import { type State, type Files, type Journey, type BreakingChange, ProtocolError, insist, emit, getJourney, activeJourney, acquire, recordPatch, checkTokens, validateSubmission, finalizeIntegration, mergeFiles, remap, diff, publicState, notifyWaiters, pendingIntegrations, expire } from '@/lib/avc/core';
 export const dynamic = 'force-dynamic';
+import { submitForReview, reconciliationPlan, recordReconciliation } from '@/lib/avc/core';
 const sample: Files = { 'src/users.rs': 'pub struct User {\n    pub id: u64,\n    pub name: String,\n}\n\npub fn find_user(id: u64) -> Option<User> {\n    if id == 1 {\n        Some(User { id, name: "Ada".into() })\n    } else {\n        None\n    }\n}\n\npub fn display_name(user: &User) -> String {\n    user.name.clone()\n}\n', 'Cargo.toml': '[package]\nname = "journey-demo"\nversion = "0.1.0"\nedition = "2021"\n\n[lib]\npath = "src/users.rs"\n', 'README.md': '# Journey demo\n\nA small Rust library for trying concurrent range locks and recorded changesets.\n\nRun cargo test locally. CI is optional.\n' };
 const field = (v: unknown, name: string, max = 4000) => { insist(typeof v === 'string' && v.trim().length > 0 && v.length <= max, 'invalid_input', `${name} is required (maximum ${max} characters).`, 400); return v.trim(); };
 function error(e: unknown) { const p = e as ProtocolError; return Response.json({ error: p.message ?? 'Unexpected server error.', code: p.code ?? 'server_error', details: p.details }, { status: p.status ?? 500 }); }
@@ -181,12 +182,7 @@ export async function POST(req: Request) {
                         break;
                     }
                     case 'submit': {
-                        insist(b.revision === j.head, 'stale_revision', 'Submit the current journey revision.');
-                        checkTokens(s, j, b.tokens ?? []);
-                        validateSubmission(s, j);
-                        j.status = 'review';
-                        emit(s, 'review.requested', user.id, { revision: j.head, title: j.title }, j.id, [j.id]);
-                        result = { revision: j.head };
+                        result = submitForReview(s, j, b.revision, user.id);
                         break;
                     }
                     case 'review': {
@@ -216,10 +212,11 @@ export async function POST(req: Request) {
                     }
                     case 'reconcile': {
                         insist(b.head === s.head && b.cursor === s.integrationCursor, 'stale_reconciliation', 'The integration head changed. Fetch the new events.');
-                        const pending = pendingIntegrations(s, j);
-                        for (const e of pending)
-                            insist(['unaffected', 'adapted', 'needs_review'].includes(b.dispositions?.[e.id]), 'disposition_required', 'Provide a disposition for every pending integration.', 400);
-                        insist(!pending.some(e => b.dispositions[e.id] === 'needs_review'), 'needs_review', 'Resolve affected integrations before completing reconciliation.');
+                        const plan = reconciliationPlan(s, j, b.dispositions);
+                        if (plan.current) {
+                            result = { revision: j.head, status: j.status, manifestDeclared: j.manifestDeclared, unchanged: true };
+                            break;
+                        }
                         const old = await git.files(j.head);
                         const base = await git.files(j.base);
                         const canonical = await git.files(s.head);
@@ -233,16 +230,8 @@ export async function POST(req: Request) {
                             l.end = end;
                             l.revision = c.oid;
                         }
-                        j.head = c.oid;
-                        j.base = s.head;
-                        j.reconciledHead = s.head;
-                        j.reconciledCursor = s.integrationCursor;
-                        Object.assign(j.dispositions, b.dispositions);
-                        j.status = 'working';
-                        j.manifestDeclared = false;
                         s.revisions[c.oid] = c.meta;
-                        emit(s, 'journey.reconciled', user.id, { revision: c.oid, head: s.head, cursor: s.integrationCursor, dispositions: b.dispositions }, j.id, [j.id]);
-                        result = { revision: c.oid };
+                        result = recordReconciliation(s, j, c.oid, b.dispositions, user.id);
                         break;
                     }
                     case 'integrate': {

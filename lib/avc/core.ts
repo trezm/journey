@@ -271,6 +271,45 @@ export function recordPatch(s: State, j: Journey, changesetId: string, files: Fi
 }
 export function pendingIntegrations(s: State, j: Journey) { return s.events.filter(e => e.type === 'journey.integrated' && e.id > j.reconciledCursor && e.journey !== j.id); }
 export function validateSubmission(s: State, j: Journey) { insist(j.changesets.some(c => c.patches.length), 'empty_journey', 'Record at least one patch.'); insist(j.manifestDeclared, 'manifest_required', 'Declare breaking changes, or explicitly declare none.'); insist(j.reconciledHead === s.head && j.reconciledCursor === s.integrationCursor, 'reconciliation_required', 'Reconcile intervening integrated journeys before submitting.', 409, { head: s.head, cursor: s.integrationCursor, events: pendingIntegrations(s, j) }); insist(!j.reviews.some(r => r.kind === 'request_changes' && !r.resolved), 'changes_requested', 'Resolve outstanding review requests first.'); }
+// Submission refers to already-published work; editing leases are checked when that work is published.
+export function submitForReview(s: State, j: Journey, revision: string, actor: string) {
+    insist(revision === j.head, 'stale_revision', 'Submit the current journey revision.');
+    validateSubmission(s, j);
+    j.status = 'review';
+    emit(s, 'review.requested', actor, { revision: j.head, title: j.title }, j.id, [j.id]);
+    return { revision: j.head };
+}
+export function reconciliationPlan(s: State, j: Journey, dispositions?: Record<string, string>) {
+    const pending = pendingIntegrations(s, j);
+    for (const event of pending)
+        insist(['unaffected', 'adapted', 'needs_review'].includes(dispositions?.[event.id] ?? ''), 'disposition_required', 'Provide a disposition for every pending integration.', 400);
+    insist(!pending.some(event => dispositions?.[event.id] === 'needs_review'), 'needs_review', 'Resolve affected integrations before completing reconciliation.');
+    return {
+        current: j.reconciledHead === s.head && j.reconciledCursor === s.integrationCursor,
+        unaffected: pending.every(event => dispositions?.[event.id] === 'unaffected'),
+        dispositions: Object.fromEntries(pending.map(event => [event.id, dispositions![event.id]])),
+    };
+}
+export function recordReconciliation(s: State, j: Journey, revision: string, dispositions: Record<string, string> | undefined, actor: string) {
+    const plan = reconciliationPlan(s, j, dispositions);
+    if (plan.current)
+        return { revision: j.head, status: j.status, manifestDeclared: j.manifestDeclared, unchanged: true };
+    const submitted = j.status === 'review' && j.manifestDeclared;
+    j.head = revision;
+    j.base = s.head;
+    j.reconciledHead = s.head;
+    j.reconciledCursor = s.integrationCursor;
+    Object.assign(j.dispositions, plan.dispositions);
+    j.status = submitted && plan.unaffected ? 'review' : 'working';
+    if (!plan.unaffected)
+        j.manifestDeclared = false;
+    // An unaffected disposition retains submission, never approval of the earlier exact revision.
+    for (const review of j.reviews)
+        if (review.kind === 'approve')
+            review.resolved = true;
+    emit(s, 'journey.reconciled', actor, { revision, head: s.head, cursor: s.integrationCursor, dispositions: plan.dispositions }, j.id, [j.id]);
+    return { revision, status: j.status, manifestDeclared: j.manifestDeclared };
+}
 export function finalizeIntegration(s: State, j: Journey, revision: string, actor: string, oldCanonical: Files, newCanonical: Files) {
     s.head = revision;
     j.status = 'integrated';

@@ -70,6 +70,8 @@ Worker workflow:
 6. Read node .journey/journey.mjs inbox and .journey/inbox.jsonl, including reviews and accepted journeys' breaking changes.
    Before submission, reconcile every new integration. Save dispositions.json mapping event IDs to unaffected, adapted or needs_review.
    node .journey/journey.mjs reconcile dispositions.json requires a clean published checkout; review merged code after it runs.
+   A submitted journey remains in review with its declaration when every new integration is unaffected. A new revision still needs fresh approval.
+   Submitting published work for review does not require editing locks. Publication and integration still require valid locks.
 7. node .journey/journey.mjs manifest breaking.json with an array of {target,kind,before,after,migration}, or [] to explicitly declare none.
 8. node .journey/journey.mjs submit. Human approval is required by default; agents cannot approve themselves.
 9. Respond to review requests (request JSON can resolve_review). New patches/declarations invalidate approval.
