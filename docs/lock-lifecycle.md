@@ -2,7 +2,7 @@
 
 A draft Journey uses 10-minute editing leases. Its worker watcher renews those leases every 60 seconds while monitoring the inbox. If the watcher stops or the computer sleeps for more than 10 minutes, unposted draft locks can expire. An expired token grants no editing or integration rights; acquire the scopes again before publishing or posting the Journey.
 
-**Submit for review officially posts a Journey.** Successful submission converts its valid locks into durable reservations. Those locks have no time limit: they remain held until that Journey is integrated or abandoned. Publishing an individual patch does not trigger this transition.
+**Submit for review officially posts a Journey.** Successful submission converts its valid locks into durable reservations. Those locks have no time limit: they remain held until that Journey is integrated or abandoned, except when an external Git synchronization explicitly invalidates an affected lock. Publishing an individual patch does not trigger this transition.
 
 Posted locks stay held across approvals, change requests, additional patches and reconciliation, even when an adapted reconciliation returns the Journey to in progress. New scopes acquired by a previously posted Journey are also retained. Posting never revives expired tokens or acquires missing scopes. Publication, posting and integration check valid tokens and change coverage; the repository owner follows the same integration requirement as a worker.
 
@@ -13,3 +13,11 @@ Integrating or abandoning a Journey releases all its locks and notifies waiting 
 For existing Journeys, the server recognizes prior review submissions and retains surviving locks. It does not recreate locks that expired before this change. Reacquire those scopes once; they become durable when the Journey is already posted. If another Journey now holds a conflicting scope, wait for its integration or abandonment.
 
 The API exposes `journey.posted` and `lease.retained`. Clients treat `retained: true` as authoritative regardless of the numeric `expires` field. That field remains a far-future numeric value for compatibility with older clients. Draft locks retain ordinary expiry timestamps. Retained lock tokens are still required and must never be printed or committed.
+
+## External Git synchronization
+
+An enabled Git remote can advance canonical `main` without acquiring Journey locks. Sync invalidates leases overlapping incoming changes, including retained leases, and records notifications. It may conservatively invalidate a whole changed path when ranges cannot be mapped reliably or the Git entry type or mode changes. Original journeys, recorded patches, and reviews remain available.
+
+The runner holds a repository write barrier during synchronization. After the final head is published, affected workers must read the external-update event, reconcile their journey, and reacquire the missing scopes against the resulting revision. Reacquiring against the old head while sync is still running is rejected. Unaffected leases retain their valid remapped ranges. Previous exact-revision approvals do not authorize a reconciled revision.
+
+If a worker's unpublished journey changes overlap the incoming content, reconciliation reports a conflict. Preserve the working checkout and recorded patches; resolve deliberately or start a new journey from updated `main` and reapply the intended changes under fresh locks. A repository sync conflict separately freezes repository writes until the owner resolves the exported conflict branch and resumes synchronization. See [Git sync recovery](git-sync.md).

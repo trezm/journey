@@ -13,6 +13,7 @@ Working MVP of journey-based version control. A journey contains described chang
 - Required breaking-change declarations (explicit empty lists allowed), per-integration dispositions, stale-head rejection and repository-state compare-and-swap publication.
 - Owner integration and the Integrate button require approval of the exact current revision. Worker approval remains configurable in repository settings. Builds and tests are deliberately outside the protocol.
 - Email/password accounts and hashed sessions for Cloudflare hosting. Public identity headers are never accepted as authentication.
+- Generic two-way Git synchronization through a separate Node.js/Git runner: automatic publishing, inbound updates, rebasing, exact-SHA push leases, and preserved conflict branches with explicit recovery.
 
 ## Import and connect Codex
 
@@ -92,6 +93,18 @@ node cli/agent.mjs keepalive JOURNEY_ID
 node cli/agent.mjs patch JOURNEY_ID CHANGESET_ID src/users.rs ./users.rs 'Handle missing users'
 ```
 
+## Git remotes and synchronization
+
+In repository **Settings**, configure a credential-free Git remote and target branch, then run the downloadable `git-sync.mjs` with a coordinator connection on a machine with Node.js 22+ and Git:
+
+```sh
+node git-sync.mjs --connection journey-connection.json --watch
+```
+
+The runner publishes accepted `main` commits and imports remote changes. When both sides advance it rebases Journey's unpublished commits onto the remote, then pushes with a lease tied to the fetched remote SHA. External updates can invalidate overlapping locks, including posted locks. Affected journeys retain their work and must reconcile and reacquire against the synchronized head. Conflicts pause repository writes and export the original Journey head to a remote conflict branch for manual Git resolution.
+
+Git credentials stay on the runner. The application does not call Git-provider or deployment APIs. A service such as Workers Builds can watch the connected remote independently. The runner must stay running for automatic sync; the request Worker cannot execute native Git. See [Git sync setup and recovery](docs/git-sync.md).
+
 ## Git and Cloudflare Artifacts
 
 The app stores actual Git objects, not synthetic revision labels. `GET /api/git/PROJECT_ID/` supports Git dumb-HTTP cloning with an agent token as the Basic-auth password or a bearer header. It exposes main and journey refs; writes must use the journey API.
@@ -102,7 +115,7 @@ Cloudflare hosting uses R2 Git-object storage. **Cloudflare Artifacts is not con
 node cli/sync-artifacts.mjs
 ```
 
-The bridge clones this repository and pushes only accepted `main` history to Artifacts using ordinary Git. It preserves Git commits and excludes isolated journey branches from publication. It does not import arbitrary existing Artifacts repositories or make Artifacts the authoritative store; that next stage needs an Artifacts binding and a recoverable remote-publication/outbox state machine.
+This legacy one-way bridge clones this repository and pushes only accepted `main` history to Artifacts using ordinary Git. For continuous two-way synchronization, use the generic Git sync runner above. Journey retains its D1/R2 storage; Artifacts is an ordinary configured Git remote.
 
 ## Validation
 

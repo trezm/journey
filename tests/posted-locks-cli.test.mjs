@@ -124,7 +124,7 @@ test('standalone keepalive renews drafts without sending retained or expired tok
     assert.equal(request.action, 'refresh'); assert.deepEqual(request.tokens, ['draft']);
 });
 
-test('generated agent instructions distinguish posting, draft expiry and terminal release', async t => {
+test('generated agent instructions distinguish posting, draft expiry and sync invalidation', async t => {
     const f = await fixture(t, []);
     execFileSync('git', ['init', '--quiet', f.directory]);
     const result = await f.run(['setup', f.directory]);
@@ -133,7 +133,8 @@ test('generated agent instructions distinguish posting, draft expiry and termina
     assert.match(instructions, /Submitting for review officially posts the journey/);
     assert.match(instructions, /Published patches alone do not post it/);
     assert.match(instructions, /draft locks expire after 10 minutes without renewal/);
-    assert.match(instructions, /Retained locks are released only when the journey integrates or is abandoned/);
+    assert.match(instructions, /Retained locks are released when the journey integrates or is abandoned, or invalidated by overlapping external Git sync changes/);
+    assert.match(instructions, /wait for synchronization to finish, reconcile the new main, then reacquire missing scopes/);
     assert.match(instructions, /posting never revives expired tokens/);
     assert.match(instructions, /watcher still monitors reviews and integrations after posting/);
     const protocol = await f.run(['protocol']);

@@ -2,6 +2,7 @@ import { authorize, sameOrigin } from '@/lib/avc/auth';
 import { bindings, readProject, mutate } from '@/lib/avc/storage';
 import { GitStore, decodeObject, references, object } from '@/lib/avc/git';
 import { insist, ProtocolError, emit } from '@/lib/avc/core';
+import { assertSyncWritable } from '@/lib/avc/sync';
 export const dynamic = 'force-dynamic';
 type Descriptor = { oid: string; type: string; refs: string[] };
 export async function POST(req: Request) {
@@ -13,6 +14,7 @@ export async function POST(req: Request) {
         const op = url.searchParams.get('op'), git = new GitStore(bindings().bucket, project), bucket = bindings().bucket;
         if (op === 'start') {
             const result = await mutate(project, s => {
+                assertSyncWritable(s);
                 insist(!s.journeys.length && !s.imported, 'repository_in_use', 'Import into a new repository before starting journeys.');
                 if (s.importSession) insist(s.importSession.actor === user.id || !user.agent, 'import_busy', 'Another coordinator owns this import.');
                 else s.importSession = { id: crypto.randomUUID(), actor: user.id, started: Date.now() };
@@ -21,6 +23,7 @@ export async function POST(req: Request) {
             return Response.json(result);
         }
         const session = url.searchParams.get('session'); const row = await readProject(project);
+        assertSyncWritable(row.state);
         if (op === 'finish' && row.state.imported?.session === session) return Response.json({ head: row.state.head, imported: row.state.imported });
         insist(session && row.state.importSession?.id === session && (!user.agent || row.state.importSession.actor === user.id), 'invalid_import', 'Start an import with this coordinator first.');
         if (op === 'cancel') { await mutate(project, s => { insist(s.importSession?.id === session, 'invalid_import', 'Import session changed.'); delete s.importSession; }); return Response.json({ ok: true }); }
@@ -73,6 +76,7 @@ export async function POST(req: Request) {
         }
         const imported = { session, head: input.head, refs, objectCount: objects.size, at: Date.now() };
         await mutate(project, s => {
+            assertSyncWritable(s);
             insist(s.importSession?.id === session && !s.journeys.length && !s.imported, 'import_changed', 'Repository changed during import.');
             s.head = input.head; s.revisions = { [input.head]: { parent: /^parent ([a-f0-9]{40})$/m.exec(commit)?.[1], message: commit.split('\n\n').slice(1).join('\n\n').trim(), actor: user.name, at: imported.at } };
             s.imported = imported; delete s.importSession; emit(s, 'repository.imported', user.id, { revision: input.head, objects: objects.size, refs: Object.keys(input.refs).length });

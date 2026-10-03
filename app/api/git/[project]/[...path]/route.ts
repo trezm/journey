@@ -15,7 +15,7 @@ export async function GET(req: Request, { params }: {
     if (p === 'HEAD')
         return new Response('ref: refs/heads/main\n', { headers: { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' } });
     if (p === 'info/refs') {
-        const refs = [`${row.state.head}\trefs/heads/main`, ...Object.entries(row.state.imported?.refs ?? {}).filter(([ref]) => ref !== 'refs/heads/main').map(([ref, oid]) => `${oid}\t${ref}`), ...row.state.journeys.map(j => `${j.head}\trefs/heads/journeys/${j.id}`)];
+        const refs = [`${row.state.head}\trefs/heads/main`, ...Object.entries(row.state.imported?.refs ?? {}).filter(([ref]) => ref !== 'refs/heads/main' && !Object.hasOwn(row.state.sync?.backupRefs ?? {}, ref)).map(([ref, oid]) => `${oid}\t${ref}`), ...Object.entries(row.state.sync?.backupRefs ?? {}).map(([ref, oid]) => `${oid}\t${ref}`), ...row.state.journeys.map(j => `${j.head}\trefs/heads/journeys/${j.id}`)];
         return new Response(refs.join('\n') + '\n', { headers: { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' } });
     }
     insist(/^objects\/[a-f0-9]{2}\/[a-f0-9]{38}$/.test(p), 'not_found', 'Git object not found.', 404);

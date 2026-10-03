@@ -9,6 +9,7 @@ import ts from 'typescript';
 import { LatestResource, codeRevision, codePath, repositorySelection } from '../lib/repository-code.ts';
 import * as reviewHelpers from '../lib/avc/review.ts';
 import * as requestHelpers from '../lib/avc/client.ts';
+import { isCanonicalUpdate } from '../lib/avc/core.ts';
 
 test('returning from settings selects only an owned repository and preserves valid workspace selection', () => {
     const projects = [{ id: 'first' }, { id: 'second' }];
@@ -127,9 +128,11 @@ function renderCodeWorkspace(options = {}) {
             useRepositoryFiles: () => ({ key: 'repo:main', status: 'ready', error: '', files: { 'README.md': 'Imported repository code' }, reload: async () => {} }),
         };
         if (name === '@/components/journey-sidebar') return { JourneySidebar: () => null };
+        if (name === '@/components/git-sync-warning') return { GitSyncWarning: () => null };
         if (name === '@/hooks/use-workspace-route') return { useWorkspaceRoute: () => ({ project: 'repo', selected: options.selected ?? '', tab: options.tab ?? 'code', modeChoice: { project: 'repo', mode: options.mode ?? 'repository' }, pathChoice: { project: 'repo', path: 'README.md' }, setProject: () => {}, setSelected: () => {}, setTab: () => {}, setModeChoice: () => {}, setPathChoice: () => {}, hrefFor: () => '/repositories/repo', followLink: () => {} }) };
         if (name === '@/lib/repository-code') return { codeRevision, codePath, repositorySelection };
         if (name === '@/lib/avc/review') return reviewHelpers;
+        if (name === '@/lib/avc/core') return { isCanonicalUpdate };
         if (name === '@/lib/avc/client') return { ...requestHelpers, jsonFetch: options.requestJson ?? requestHelpers.jsonFetch };
         if (name === '@/components/patch-viewer') return { PatchViewer: () => null };
         if (name === '@/components/repository-code-panel') return { RepositoryCodePanel: props => React.createElement('pre', { 'data-revision': props.revision }, props.content) };

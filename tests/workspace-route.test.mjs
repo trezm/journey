@@ -139,6 +139,7 @@ test('the rendered settings return control crosses the page boundary with a nati
             'next/link': { __esModule: true, default: ({ children, ...props }) => React.createElement('a', props, children) },
             'lucide-react': new Proxy({}, { get: () => () => null }),
             '@/components/ui/button': { Button: () => null }, '@/components/ui/switch': { Switch: () => null },
+            '@/components/git-sync-settings': { GitSyncSettings: () => null },
             '@/lib/avc/core': { repositoryPolicy: () => ({}) }, './settings.module.css': { default: {} },
             '@/hooks/use-workspace-route': { useWorkspaceRoute },
         }).default;
@@ -154,6 +155,7 @@ test('settings hydration never exposes a Back link to the default repository', (
         'next/link': { __esModule: true, default: ({ children, ...props }) => React.createElement('a', props, children) },
         'lucide-react': new Proxy({}, { get: () => () => null }),
         '@/components/ui/button': { Button: () => null }, '@/components/ui/switch': { Switch: () => null },
+        '@/components/git-sync-settings': { GitSyncSettings: () => null },
         '@/lib/avc/core': { repositoryPolicy: () => ({}) }, './settings.module.css': { default: {} },
         '@/hooks/use-workspace-route': { useWorkspaceRoute: () => ({ project: '', hrefFor: () => '/' }) },
     }).default;

@@ -75,7 +75,7 @@ Worker workflow:
 5. node .journey/journey.mjs run "Why this check matters" -- <executable> <args...> captures command output and exit code.
    node .journey/journey.mjs record explanation "Why this decision was made" records an explanation (mark reconstructed explicitly via request if needed).
 6. Read node .journey/journey.mjs inbox and .journey/inbox.jsonl, including reviews and accepted journeys' breaking changes.
-   Before submission, reconcile every new integration. Save dispositions.json mapping event IDs to unaffected, adapted or needs_review.
+   Before submission, reconcile every new integration and repository.synced event. Save dispositions.json mapping event IDs to unaffected, adapted or needs_review.
    node .journey/journey.mjs reconcile dispositions.json requires a clean published checkout; review merged code after it runs.
    A submitted journey remains in review with its declaration when every new integration is unaffected. A new revision still needs fresh approval.
    Submitting for review officially posts the journey and retains its valid locks until integration or abandonment.
@@ -93,7 +93,10 @@ Posted locks do not expire and need no renewal, including while the computer sle
 The watcher still monitors reviews and integrations after posting. Check .journey/watcher.log for errors.
 A draft lease that expired before posting must be reacquired; posting never revives expired tokens.
 Existing posted journeys retain surviving locks; already-lost locks must be acquired again.
-Retained locks are released only when the journey integrates or is abandoned. Never assume a notification grants a lock.
+Retained locks are released when the journey integrates or is abandoned, or invalidated by overlapping external Git sync changes.
+On sync lock invalidation, preserve your work, wait for synchronization to finish, reconcile the new main, then reacquire missing scopes.
+A repository sync conflict pauses writes until the owner resolves it. Read the warning and inbox; do not retry mutations in a tight loop.
+Never assume a notification grants a lock.
 Watcher stops when the journey integrates or is abandoned. node .journey/journey.mjs watch --background restarts it.
 From a coordinator checkout without an active journey, the watcher polls the approval queue every 5 seconds and uses a separate coordinator cursor.
 node .journey/journey.mjs abandon closes this journey and returns locks.

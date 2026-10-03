@@ -1,0 +1,34 @@
+.warning { border:1px solid #e5ba85; border-left:4px solid #ce7c2e; background:#fffaf2; border-radius:7px; padding:22px 24px; margin:20px 0; color:#664321; }
+.progress { border-color:#cad8e8; border-left-color:#6685a6; background:#f6f9fd; color:#3c536f; }
+.heading { display:flex; align-items:flex-start; gap:12px; }
+.heading>svg { flex-shrink:0; margin-top:2px; }
+.heading h2 { font-size:17px; line-height:1.4; color:inherit; }
+.heading p,.detail,.recovery p { font-size:13px; line-height:1.6; color:inherit; margin-top:5px; }
+.references { display:grid; grid-template-columns:1fr 1fr; gap:16px 24px; margin:20px 0; padding:17px 0; border-top:1px solid #e9d6bb; border-bottom:1px solid #e9d6bb; }
+.reference { min-width:0; }
+.reference dt { font-size:12px; font-weight:600; margin-bottom:5px; }
+.reference dd { display:flex; align-items:flex-start; gap:8px; margin:0; }
+.reference dd>code,.reference a { flex:1; min-width:0; }
+.reference code { font-size:12px; overflow-wrap:anywhere; user-select:all; }
+.reference a { color:#98541d; display:flex; align-items:center; gap:6px; text-decoration:underline; text-underline-offset:3px; }
+.reference a svg { flex-shrink:0; }
+.reference button { background:transparent; border:0; padding:3px; border-radius:4px; color:inherit; cursor:pointer; }
+.reference button:hover { background:#f2e6d3; }
+.reference p { font-size:12px; }
+.publication { display:flex; align-items:flex-start; gap:9px; margin-top:14px; }
+.publication svg { flex-shrink:0; margin-top:2px; }
+.publication p { color:inherit; font-size:13px; line-height:1.6; }
+.files { margin-top:18px; }
+.files h3,.recovery h3 { font-size:14px; color:inherit; }
+.files ul { margin-top:8px; padding-left:20px; font-size:12px; line-height:1.8; overflow-wrap:anywhere; }
+.recovery { margin-top:22px; }
+.recovery h3 { display:flex; align-items:center; gap:7px; }
+.recovery ol { padding-left:20px; font-size:13px; line-height:1.7; margin-top:10px; }
+.recovery li { padding-left:3px; margin-top:5px; }
+.recovery code { overflow-wrap:anywhere; }
+.resume { border-top:1px solid #e9d6bb; margin-top:20px; padding-top:18px; }
+.resume label { font-size:13px; font-weight:600; display:block; color:inherit; }
+.resume input { width:100%; max-width:490px; display:block; font-family:monospace; font-size:13px; margin-top:7px; padding:10px 12px; background:white; border:1px solid #d7c7b0; border-radius:5px; }
+.resume p { color:inherit; font-size:12px; margin:8px 0 14px; line-height:1.6; }
+.error { font-size:13px; line-height:1.6; margin-top:12px; color:#a23a31; white-space:pre-wrap; overflow-wrap:anywhere; }
+@media(max-width:700px) { .warning{padding:18px 16px}.references{grid-template-columns:1fr}.resume input{max-width:none}.resume button{width:100%} }

@@ -114,17 +114,19 @@ export class GitStore {
         }
         await this.bucket.put(`${this.project}/snapshots/${oid}`, JSON.stringify(files)); return files;
     }
-    async save(files: Files, parent: string | undefined, message: string, actor: string) {
+    async save(files: Files, parent: string | undefined, message: string, actor: string, preserveFrom = parent) {
         insist(Object.keys(files).length <= 4000 && Object.values(files).reduce((n, text) => n + utf8.encode(text).length, 0) <= 12_000_000, 'text_capacity', 'Editable snapshot exceeds 4,000 files or 12 MB. Untouched non-editable Git entries are preserved.', 413);
         let preserved: Entries = Object.create(null), previous: { entries: Entries; tree: string } | undefined;
         let changed = files;
-        if (parent) {
-            const entries = await this.entries(parent), commit = await this.read(parent);
+        // Reconciliation retains the journey's commit ancestry, but inherits
+        // modes and non-editable entries from the latest canonical tree.
+        if (preserveFrom) {
+            const entries = await this.entries(preserveFrom), commit = await this.read(preserveFrom);
             insist(commit.type === 'commit', 'invalid_revision', 'Expected a Git commit.', 400);
             const tree = /^tree ([a-f0-9]{40})$/m.exec(new TextDecoder().decode(commit.body))?.[1];
             insist(tree, 'invalid_commit', 'Commit has no tree.', 400);
             previous = { entries, tree }; preserved = Object.assign(Object.create(null), entries);
-            const before = await this.files(parent);
+            const before = await this.files(preserveFrom);
             for (const path of Object.keys(before)) if (!(path in files)) delete preserved[path];
             for (const path of Object.keys(files)) insist(!preserved[path] || path in before, 'unsupported_edit', `${path} is a binary, symlink, submodule or file outside the text editing limits. It is preserved but cannot be edited through this API.`, 400);
             changed = Object.fromEntries(Object.entries(files).filter(([path, text]) => before[path] !== text));

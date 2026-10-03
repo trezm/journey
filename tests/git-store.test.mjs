@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { deflateSync } from 'node:zlib';
 import { GitStore, makeCommit, object, decodeObject, concatenate } from '../lib/avc/git.ts';
+import { mergeFiles } from '../lib/avc/core.ts';
 
 class MemoryBucket {
     data = new Map();
@@ -71,6 +72,41 @@ test('incremental saves preserve executable, binary, symlink and submodule entri
     assert.deepEqual(await git.files(saved.oid), after);
     assert.equal(await git.entries(initial.oid).then(e => e['deleted.txt'].oid), initial.entries['deleted.txt'].oid);
     await assert.rejects(git.save({ ...after, 'binary.bin': 'Overwrite' }, saved.oid, 'Invalid', 'Tester'), /cannot be edited/);
+});
+
+test('reconciling after remote sync inherits external binaries, modes, symlinks and deletions while keeping journey ancestry', async () => {
+    const bucket = new MemoryBucket(), git = new GitStore(bucket, 'external-sync');
+    const encoder = new TextEncoder();
+    const binary = await object('blob', Uint8Array.from([0, 1, 2]));
+    const nextBinary = await object('blob', Uint8Array.from([0, 3, 4]));
+    const link = await object('blob', encoder.encode('before.txt'));
+    const nextLink = await object('blob', encoder.encode('after.txt'));
+    const initial = await makeCommit({ 'code.txt': 'base\n', 'run.sh': 'echo before\n', 'removed.txt': 'remove\n' }, undefined, 'Initial', 'Tester', 1700000000000, {
+        'data.bin': { mode: '100644', oid: binary.oid },
+        link: { mode: '120000', oid: link.oid },
+        module: { mode: '160000', oid: 'a'.repeat(40) },
+        'removed.bin': { mode: '100644', oid: binary.oid },
+    });
+    const put = objects => { for (const o of objects) bucket.data.set(git.key(o.oid), deflateSync(o.raw)); };
+    put([...initial.objects, binary, nextBinary, link, nextLink]);
+    const ours = await git.save({ ...await git.files(initial.oid), 'code.txt': 'journey edit\n' }, initial.oid, 'Journey work', 'Agent');
+    const remote = await makeCommit({ 'code.txt': 'base\n', 'run.sh': 'echo remote\n' }, initial.oid, 'External changes', 'Remote', 1700000001000, {
+        'run.sh': { mode: '100755', oid: initial.entries['run.sh'].oid },
+        'data.bin': { mode: '100644', oid: nextBinary.oid },
+        link: { mode: '120000', oid: nextLink.oid },
+        module: { mode: '160000', oid: 'b'.repeat(40) },
+    });
+    put(remote.objects);
+    const merged = mergeFiles(await git.files(initial.oid), await git.files(ours.oid), await git.files(remote.oid));
+    const result = await git.save(merged, ours.oid, 'Reconcile', 'Agent', remote.oid);
+    const entries = await git.entries(result.oid);
+    assert.equal((await git.files(result.oid))['code.txt'], 'journey edit\n');
+    assert.equal((await git.files(result.oid))['run.sh'], 'echo remote\n');
+    for (const path of ['data.bin', 'link', 'module', 'run.sh']) assert.deepEqual(entries[path], remote.entries[path]);
+    assert.equal(entries['removed.bin'], undefined);
+    assert.equal(entries['removed.txt'], undefined);
+    assert.match(new TextDecoder().decode((await git.read(result.oid)).body), new RegExp(`parent ${ours.oid}`));
+    assert.deepEqual((await git.entries(ours.oid))['data.bin'], initial.entries['data.bin']);
 });
 
 test('object writes are deduplicated and complete before snapshot publication', async () => {

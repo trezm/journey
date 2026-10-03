@@ -1,3 +1,4 @@
+import type { SyncState } from './sync.ts';
 export type Files = Record<string, string>;
 export type Hunk = {
     start: number;
@@ -122,6 +123,7 @@ export type State = {
     allowCoordinatorApproval?: boolean;
     importSession?: { id: string; actor: string; started: number };
     imported?: { session: string; head: string; refs: Record<string, string>; objectCount: number; at: number };
+    sync?: SyncState;
 };
 export class ProtocolError extends Error {
     status: number;
@@ -299,7 +301,8 @@ export function recordPatch(s: State, j: Journey, changesetId: string, files: Fi
     emit(s, 'patch.recorded', actor, { patchId: patch.id, changesetId: c.id, revision: after, description }, j.id, [j.id]);
     return patch;
 }
-export function pendingIntegrations(s: State, j: Journey) { return s.events.filter(e => e.type === 'journey.integrated' && e.id > j.reconciledCursor && e.journey !== j.id); }
+export function isCanonicalUpdate(event: Pick<Event, 'type'>) { return event.type === 'journey.integrated' || event.type === 'repository.synced'; }
+export function pendingIntegrations(s: State, j: Journey) { return s.events.filter(e => isCanonicalUpdate(e) && e.id > j.reconciledCursor && e.journey !== j.id); }
 export function validateSubmission(s: State, j: Journey) { insist(j.changesets.some(c => c.patches.length), 'empty_journey', 'Record at least one patch.'); insist(j.manifestDeclared, 'manifest_required', 'Declare breaking changes, or explicitly declare none.'); insist(j.reconciledHead === s.head && j.reconciledCursor === s.integrationCursor, 'reconciliation_required', 'Reconcile intervening integrated journeys before submitting.', 409, { head: s.head, cursor: s.integrationCursor, events: pendingIntegrations(s, j) }); insist(!j.reviews.some(r => r.kind === 'request_changes' && !r.resolved), 'changes_requested', 'Resolve outstanding review requests first.'); }
 // The route checks complete immutable diff coverage before retaining these actual grants.
 export function submitForReview(s: State, j: Journey, revision: string, actor: string, tokens?: string[], now = Date.now()) {
@@ -388,7 +391,7 @@ export function validateIntegrationAuthority(s: State, j: Journey, user: Reviewe
     insist(!user.agent || repositoryPolicy(s).allowWorkerMerge, 'worker_merge_disabled', 'The repository owner has disabled worker merging.', 403);
     if (!user.agent || s.requireApproval) insist(hasApproval(s, j), 'approval_required', 'An authorized reviewer must approve this exact revision.');
 }
-const approvalEventTypes = new Set(['review.requested', 'review.approved', 'review.changes_requested', 'review.commented', 'review.resolved', 'patch.recorded', 'manifest.updated', 'journey.reconciled', 'journey.integrated', 'journey.abandoned', 'policy.changed']);
+const approvalEventTypes = new Set(['review.requested', 'review.approved', 'review.changes_requested', 'review.commented', 'review.resolved', 'patch.recorded', 'manifest.updated', 'journey.reconciled', 'journey.integrated', 'repository.synced', 'lock.invalidated', 'sync.started', 'sync.restarted', 'journey.abandoned', 'policy.changed']);
 export function approvalInbox(s: State, user: Reviewer, since = 0, legacyRoles: Record<string, string> = {}) {
     insist(!user.agent || user.role === 'coordinator', 'forbidden', 'Only the repository owner or a coordinator can read the approval queue.', 403);
     insist(Number.isSafeInteger(since) && since >= 0, 'invalid_cursor', 'Invalid event cursor.', 400);
