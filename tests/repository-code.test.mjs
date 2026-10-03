@@ -129,6 +129,7 @@ function renderCodeWorkspace(options = {}) {
         if (name === '@/lib/repository-code') return { codeRevision, codePath, repositorySelection };
         if (name === '@/lib/avc/review') return reviewHelpers;
         if (name === '@/lib/avc/client') return { ...requestHelpers, jsonFetch: options.requestJson ?? requestHelpers.jsonFetch };
+        if (name === '@/components/patch-viewer') return { PatchViewer: () => null };
         if (name === '@/components/repository-code-panel') return { RepositoryCodePanel: props => React.createElement('pre', { 'data-revision': props.revision }, props.content) };
         if (name === '@/components/repository-picker') return { RepositoryPicker: () => null };
         if (name === '@/components/ui/button') return { Button: ({ children, ...props }) => { options.onButton?.({ children, ...props }); return React.createElement('button', props, children); } };
