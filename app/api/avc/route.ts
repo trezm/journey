@@ -1,12 +1,16 @@
 import { bindings, readProject, mutate } from '@/lib/avc/storage';
 import { authorize, sameOrigin, digest, token } from '@/lib/avc/auth';
 import { GitStore } from '@/lib/avc/git';
-import { type State, type Files, type Journey, type BreakingChange, ProtocolError, insist, emit, getJourney, activeJourney, acquire, recordPatch, checkTokens, validateSubmission, finalizeIntegration, mergeFiles, remap, diff, publicState, notifyWaiters, pendingIntegrations, expire } from '@/lib/avc/core';
+import { type State, type Files, type Journey, type BreakingChange, ProtocolError, insist, emit, getJourney, activeJourney, acquire, recordPatch, checkTokens, validateSubmission, finalizeIntegration, mergeFiles, remap, diff, publicState, notifyWaiters, pendingIntegrations, expire, updatePolicy, approvalAuthority, validateIntegrationAuthority, approvalInbox } from '@/lib/avc/core';
 export const dynamic = 'force-dynamic';
 import { submitForReview, reconciliationPlan, recordReconciliation } from '@/lib/avc/core';
 const sample: Files = { 'src/users.rs': 'pub struct User {\n    pub id: u64,\n    pub name: String,\n}\n\npub fn find_user(id: u64) -> Option<User> {\n    if id == 1 {\n        Some(User { id, name: "Ada".into() })\n    } else {\n        None\n    }\n}\n\npub fn display_name(user: &User) -> String {\n    user.name.clone()\n}\n', 'Cargo.toml': '[package]\nname = "journey-demo"\nversion = "0.1.0"\nedition = "2021"\n\n[lib]\npath = "src/users.rs"\n', 'README.md': '# Journey demo\n\nA small Rust library for trying concurrent range locks and recorded changesets.\n\nRun cargo test locally. CI is optional.\n' };
 const field = (v: unknown, name: string, max = 4000) => { insist(typeof v === 'string' && v.trim().length > 0 && v.length <= max, 'invalid_input', `${name} is required (maximum ${max} characters).`, 400); return v.trim(); };
 function error(e: unknown) { const p = e as ProtocolError; return Response.json({ error: p.message ?? 'Unexpected server error.', code: p.code ?? 'server_error', details: p.details }, { status: p.status ?? 500 }); }
+async function legacyActorRoles(project: string) {
+    const rows = await bindings().db.prepare('SELECT digest,role FROM agents WHERE project=?').bind(project).all<{ digest: string; role: string }>();
+    return Object.fromEntries(rows.results.map(row => ['agent:' + row.digest.slice(0, 16), row.role]));
+}
 export async function GET(req: Request) {
     try {
         const url = new URL(req.url);
@@ -22,6 +26,7 @@ export async function GET(req: Request) {
             await mutate(id, () => null);
             row = await readProject(id);
         }
+        if (url.searchParams.get('approvals') === '1') return Response.json(approvalInbox(row.state, user, Number(url.searchParams.get('since') ?? 0), await legacyActorRoles(id)));
         const git = new GitStore(bindings().bucket, id);
         const revision = url.searchParams.get('revision');
         if (revision) {
@@ -57,7 +62,7 @@ export async function POST(req: Request) {
             const files = b.files ?? (b.empty ? {} : sample);
             insist(files && typeof files === 'object' && !Array.isArray(files) && Object.values(files).every(v => typeof v === 'string'), 'invalid_files', 'Files must map paths to text.', 400);
             const c = await git.save(files, undefined, 'Initialize repository', user.name);
-            const s: State = { id, name, head: c.oid, revisions: { [c.oid]: c.meta }, journeys: [], leases: [], waiting: [], events: [], sequence: 0, integrationCursor: 0, generation: 0, receipts: {}, requireApproval: true };
+            const s: State = { id, name, head: c.oid, revisions: { [c.oid]: c.meta }, journeys: [], leases: [], waiting: [], events: [], sequence: 0, integrationCursor: 0, generation: 0, receipts: {}, requireApproval: true, allowWorkerMerge: true, allowCoordinatorApproval: false };
             emit(s, 'repository.created', user.id, { name, revision: c.oid });
             await bindings().db.prepare('INSERT INTO projects(id,owner,name,state) VALUES(?,?,?,?)').bind(id, user.id, name, JSON.stringify(s)).run();
             return Response.json({ project: id });
@@ -78,6 +83,7 @@ export async function POST(req: Request) {
             await bindings().db.prepare('DELETE FROM agents WHERE digest=? AND project=?').bind(await digest(field(b.token, 'Token', 100)), id).run();
             return Response.json({ ok: true });
         }
+        const legacyRoles = action === 'review' && b.kind === 'approve' && user.agent ? await legacyActorRoles(id) : {};
         const requestId = field(b.requestId, 'Request ID', 100);
         const result = await mutate(id, async (s) => {
             const receipt = s.receipts[user.id + ':' + requestId] as {
@@ -93,17 +99,15 @@ export async function POST(req: Request) {
             if (action === 'create_journey') {
                 insist(!s.importSession, 'import_in_progress', 'Finish or cancel the repository import before starting journeys.');
                 const title = field(b.title, 'Journey title', 150);
-                const j: Journey = { id: crypto.randomUUID(), title, description: field(b.description ?? title, 'Description'), actor: user.id, status: 'working', base: s.head, head: s.head, reconciledHead: s.head, reconciledCursor: s.integrationCursor, changesets: [], manifest: [], manifestDeclared: false, reviews: [], dispositions: {}, created: Date.now() };
+                const j: Journey = { id: crypto.randomUUID(), title, description: field(b.description ?? title, 'Description'), actor: user.id, actorRole: user.agent ? user.role === 'coordinator' ? 'coordinator' : 'worker' : 'human', status: 'working', base: s.head, head: s.head, reconciledHead: s.head, reconciledCursor: s.integrationCursor, changesets: [], manifest: [], manifestDeclared: false, reviews: [], dispositions: {}, created: Date.now() };
                 s.journeys.push(j);
                 emit(s, 'journey.created', user.id, { title }, j.id, [j.id]);
                 result = { journey: j.id };
             }
             else if (action === 'policy') {
-                insist(!user.agent, 'forbidden', 'Only humans can change review policy.', 403);
-                insist(typeof b.requireApproval === 'boolean', 'invalid_policy', 'Approval policy must be a boolean.', 400);
-                s.requireApproval = b.requireApproval;
-                emit(s, 'policy.changed', user.id, { requireApproval: s.requireApproval });
-                result = { ok: true };
+                const policy = updatePolicy(s, b, user);
+                emit(s, 'policy.changed', user.id, policy);
+                result = { ok: true, policy };
             }
             else {
                 const j = action === 'review' || action === 'resolve_review' ? getJourney(s, field(b.journey, 'Journey ID', 100)) : activeJourney(s, field(b.journey, 'Journey ID', 100));
@@ -188,7 +192,7 @@ export async function POST(req: Request) {
                     case 'review': {
                         insist(j.status === 'review', 'not_in_review', 'The journey must be submitted for review.');
                         insist(['comment', 'request_changes', 'approve'].includes(b.kind), 'invalid_review', 'Unknown review action.', 400);
-                        insist(!user.agent || b.kind !== 'approve', 'human_approval_required', 'Agent comments are allowed; approval requires a human reviewer.', 403);
+                        const authority = b.kind === 'approve' ? approvalAuthority(s, j, user, legacyRoles) : undefined;
                         insist(b.revision === j.head, 'stale_review', 'This review targets an old revision.');
                         if (b.changeset)
                             insist(j.changesets.some(c => c.id === b.changeset), 'changeset_not_found', 'Invalid review anchor.', 404);
@@ -196,9 +200,9 @@ export async function POST(req: Request) {
                             insist(j.changesets.some(c => c.patches.some(p => p.id === b.patch)), 'patch_not_found', 'Invalid patch anchor.', 404);
                         if (b.kind === 'approve')
                             validateSubmission(s, j);
-                        const r = { id: crypto.randomUUID(), actor: user.id, body: field(b.body ?? (b.kind === 'approve' ? 'Approved' : 'Review'), 'Review text'), kind: b.kind, revision: j.head, at: Date.now(), ...(b.changeset ? { changeset: b.changeset } : {}), ...(b.patch ? { patch: b.patch } : {}) };
+                        const r = { id: crypto.randomUUID(), actor: user.id, body: field(b.body ?? (b.kind === 'approve' ? 'Approved' : 'Review'), 'Review text'), kind: b.kind, revision: j.head, at: Date.now(), ...(authority ? { authority } : {}), ...(b.changeset ? { changeset: b.changeset } : {}), ...(b.patch ? { patch: b.patch } : {}) };
                         j.reviews.push(r);
-                        emit(s, b.kind === 'approve' ? 'review.approved' : b.kind === 'request_changes' ? 'review.changes_requested' : 'review.commented', user.id, { review: r.id, body: r.body, revision: j.head }, j.id, [j.id]);
+                        emit(s, b.kind === 'approve' ? 'review.approved' : b.kind === 'request_changes' ? 'review.changes_requested' : 'review.commented', user.id, { review: r.id, body: r.body, revision: j.head, ...(authority ? { authority } : {}) }, j.id, [j.id]);
                         result = { review: r.id };
                         break;
                     }
@@ -239,8 +243,7 @@ export async function POST(req: Request) {
                         insist(b.revision === j.head && b.head === s.head && b.cursor === s.integrationCursor, 'stale_integration', 'The candidate or integration head changed.');
                         checkTokens(s, j, b.tokens ?? []);
                         validateSubmission(s, j);
-                        if (s.requireApproval)
-                            insist(j.reviews.some(r => r.kind === 'approve' && r.revision === j.head && !r.resolved), 'approval_required', 'A human must approve this exact revision.');
+                        validateIntegrationAuthority(s, j, user);
                         break;
                     }
                     case 'abandon': {

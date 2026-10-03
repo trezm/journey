@@ -58,12 +58,14 @@ export type Review = {
     patch?: string;
     at: number;
     resolved?: boolean;
+    authority?: 'human' | 'coordinator';
 };
 export type Journey = {
     id: string;
     title: string;
     description: string;
     actor: string;
+    actorRole?: 'human' | 'worker' | 'coordinator';
     status: 'working' | 'review' | 'integrated' | 'abandoned';
     base: string;
     head: string;
@@ -114,6 +116,8 @@ export type State = {
     generation: number;
     receipts: Record<string, unknown>;
     requireApproval: boolean;
+    allowWorkerMerge?: boolean;
+    allowCoordinatorApproval?: boolean;
     importSession?: { id: string; actor: string; started: number };
     imported?: { session: string; head: string; refs: Record<string, string>; objectCount: number; at: number };
 };
@@ -328,4 +332,45 @@ export function finalizeIntegration(s: State, j: Journey, revision: string, acto
     notifyWaiters(s);
     return event;
 }
-export function publicState(s: State, actor: string, agent = false) { return { ...s, leases: s.leases.map(l => ({ ...l, token: !agent || s.journeys.find(j => j.id === l.journey)?.actor === actor ? l.token : undefined })), receipts: undefined }; }
+export function publicState(s: State, actor: string, agent = false) { return { ...s, ...repositoryPolicy(s), leases: s.leases.map(l => ({ ...l, token: !agent || s.journeys.find(j => j.id === l.journey)?.actor === actor ? l.token : undefined })), receipts: undefined }; }
+
+export type Reviewer = { id: string; agent: boolean; role?: string };
+export function repositoryPolicy(s: State) { return { requireApproval: s.requireApproval, allowWorkerMerge: s.allowWorkerMerge ?? true, allowCoordinatorApproval: s.allowCoordinatorApproval ?? false }; }
+export function updatePolicy(s: State, input: Record<string, unknown>, user: Reviewer) {
+    insist(!user.agent, 'forbidden', 'Only the repository owner can change settings.', 403);
+    const fields = ['requireApproval', 'allowWorkerMerge', 'allowCoordinatorApproval'] as const;
+    insist(fields.some(key => Object.hasOwn(input, key)), 'invalid_policy', 'Supply at least one repository setting.', 400);
+    for (const key of fields) if (Object.hasOwn(input, key)) insist(typeof input[key] === 'boolean', 'invalid_policy', 'Repository settings must be booleans.', 400);
+    for (const key of fields) if (Object.hasOwn(input, key)) s[key] = input[key] as boolean;
+    if (input.allowCoordinatorApproval === false) for (const j of s.journeys) for (const r of j.reviews) if (r.authority === 'coordinator' && r.kind === 'approve') r.resolved = true;
+    return repositoryPolicy(s);
+}
+export function workerJourney(j: Journey, legacyRoles: Record<string, string> = {}) { return j.actor.startsWith('agent:') && (j.actorRole ?? legacyRoles[j.actor]) === 'worker'; }
+export function approvalAuthority(s: State, j: Journey, user: Reviewer, legacyRoles: Record<string, string> = {}): 'human' | 'coordinator' {
+    if (!user.agent) return 'human';
+    insist(user.role === 'coordinator', 'human_approval_required', 'Workers cannot approve journeys.', 403);
+    insist(repositoryPolicy(s).allowCoordinatorApproval, 'coordinator_approval_disabled', 'The repository owner must allow coordinator approval in settings.', 403);
+    insist(j.actor !== user.id, 'self_approval_denied', 'A coordinator cannot approve its own journey.', 403);
+    insist(workerJourney(j, legacyRoles), 'worker_journey_required', 'Coordinators may approve only worker journeys.', 403);
+    return 'coordinator';
+}
+export function hasApproval(s: State, j: Journey) { return j.reviews.some(r => r.kind === 'approve' && r.revision === j.head && !r.resolved && (r.authority !== 'coordinator' || repositoryPolicy(s).allowCoordinatorApproval)); }
+export function validateIntegrationAuthority(s: State, j: Journey, user: Reviewer) {
+    insist(!user.agent || repositoryPolicy(s).allowWorkerMerge, 'worker_merge_disabled', 'The repository owner has disabled worker merging.', 403);
+    if (s.requireApproval) insist(hasApproval(s, j), 'approval_required', 'An authorized reviewer must approve this exact revision.');
+}
+const approvalEventTypes = new Set(['review.requested', 'review.approved', 'review.changes_requested', 'review.commented', 'review.resolved', 'patch.recorded', 'manifest.updated', 'journey.reconciled', 'journey.integrated', 'journey.abandoned', 'policy.changed']);
+export function approvalInbox(s: State, user: Reviewer, since = 0, legacyRoles: Record<string, string> = {}) {
+    insist(!user.agent || user.role === 'coordinator', 'forbidden', 'Only the repository owner or a coordinator can read the approval queue.', 403);
+    insist(Number.isSafeInteger(since) && since >= 0, 'invalid_cursor', 'Invalid event cursor.', 400);
+    const policy = repositoryPolicy(s), canApprove = !user.agent || policy.allowCoordinatorApproval;
+    const queue = s.journeys.filter(j => j.status === 'review' && (!user.agent || (j.actor !== user.id && workerJourney(j, legacyRoles)))).map(j => {
+        const reasons: string[] = [];
+        try { validateSubmission(s, j); } catch (e) { if (!(e instanceof ProtocolError)) throw e; reasons.push(e.code); }
+        const reviewable = reasons.length === 0, approved = hasApproval(s, j);
+        if (approved) reasons.push('approval_already_granted');
+        if (!canApprove) reasons.push('coordinator_approval_disabled');
+        return { journey: j.id, title: j.title, actor: j.actor, revision: j.head, reconciledHead: j.reconciledHead, reconciledCursor: j.reconciledCursor, reviewable, approved, ready: reviewable && !approved && canApprove, reasons };
+    });
+    return { policy, canApprove, head: s.head, integrationCursor: s.integrationCursor, cursor: s.sequence, queue, ready: queue.filter(j => j.ready), events: s.events.filter(e => e.id > since && approvalEventTypes.has(e.type)) };
+}

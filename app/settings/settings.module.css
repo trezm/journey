@@ -1,0 +1,32 @@
+.page { min-height:100vh; background:#f7f9fc; }
+.header { display:flex; align-items:center; justify-content:space-between; gap:20px; padding:23px 40px; background:white; border-bottom:1px solid #e2e7ef; }
+.brand { display:flex; align-items:center; gap:10px; color:#182234; font-weight:650; font-size:23px; text-decoration:none; letter-spacing:-.5px; }
+.brand span { display:flex; align-items:center; justify-content:center; width:34px; height:34px; border-radius:7px; color:white; background:#d85324; }
+.back { display:flex; align-items:center; gap:7px; color:#657186; text-decoration:none; font-size:14px; }
+.back:hover,.recovery:hover { color:#c84c20; }
+.content { max-width:940px; margin:0 auto; padding:44px 28px 80px; }
+.heading { margin-bottom:28px; }
+.heading h1 { display:flex; align-items:center; gap:12px; }
+.heading h1 svg { color:#d85324; }
+.heading p { margin-top:10px; font-size:15px; }
+.eyebrow { font-size:12px; color:#8390a1; letter-spacing:1.2px; font-weight:600; margin-bottom:9px; }
+.card { border:1px solid #dfe5ed; border-radius:8px; background:white; overflow:hidden; }
+.cardHeading { padding:25px 28px; display:flex; align-items:center; gap:13px; background:#fcfdff; border-bottom:1px solid #edf0f5; }
+.cardHeading>svg { color:#d85324; }
+.cardHeading p { font-size:14px; margin-top:4px; }
+.row { display:flex; align-items:flex-start; gap:16px; padding:28px; border-bottom:1px solid #edf0f5; }
+.icon { background:#f2f5fa; color:#60738b; border-radius:7px; padding:10px; display:flex; }
+.copy { flex:1; min-width:0; }
+.copy label { font-weight:600; font-size:15px; cursor:pointer; margin-bottom:7px; }
+.copy p { max-width:590px; line-height:1.6; font-size:14px; }
+.row>button { margin-top:6px; }
+.footer { display:flex; justify-content:space-between; align-items:center; gap:16px; padding:22px 28px; background:#fcfdff; }
+.footer p { font-size:13px; }
+.footer>div { display:flex; gap:10px; }
+.ownerOnly { color:#936849; background:#fff3e8; padding:16px 28px; font-size:14px; }
+.error,.success { display:flex; align-items:center; gap:9px; border:1px solid; border-radius:6px; padding:14px 16px; font-size:14px; margin-bottom:20px; }
+.error { background:#fff1f3; color:#a62b37; border-color:#f0c4cc; }
+.success { background:#edf8f1; color:#31684f; border-color:#c7e4d3; }
+.loading { padding:30px 0; }
+.recovery { display:inline-block; color:#b45330; font-size:14px; margin-top:8px; }
+@media(max-width:650px) { .header{padding:18px 20px}.content{padding:28px 18px 50px}.cardHeading,.row{padding:22px 18px}.icon{display:none}.row{gap:14px}.footer{padding:20px 18px;align-items:flex-start;flex-direction:column}.footer>div{width:100%}.footer>div button{flex:1}.heading h1{font-size:25px}.back{font-size:12px} }

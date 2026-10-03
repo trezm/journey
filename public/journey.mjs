@@ -52,6 +52,12 @@ This issues a separate worker credential, creates a journey, clones an isolated 
 Then spawn one agent per task with that checkout as its working directory. Tell each agent to read its .journey/AGENTS.md.
 You orchestrate agent spawning in Codex; Journey coordinates their work. If your Codex session lacks spawning tools, say so instead of claiming parallel execution.
 Each journey should implement a complete feature. Changesets describe implementation steps; patches are immutable corrections.
+Run approvals [cursor] or inbox [cursor] from the coordinator checkout to see submitted journeys and the reasons they are ready or blocked.
+Run watch --background there to save repository approval events and readiness changes to .journey/coordinator-inbox.jsonl.
+Review the complete changes and compatibility declaration before running approve JOURNEY EXACT_REVISION [description].
+The repository Settings page controls agent permissions. Worker merge is enabled by default; coordinator approval is disabled by default.
+Only a human can change these settings. An opted-in coordinator can approve other workers' current submitted revisions, never its own.
+Watching the queue never approves a journey automatically.
 
 Worker workflow:
 1. node .journey/journey.mjs changeset "What this step accomplishes"
@@ -73,13 +79,15 @@ Worker workflow:
    A submitted journey remains in review with its declaration when every new integration is unaffected. A new revision still needs fresh approval.
    Submitting published work for review does not require editing locks. Publication and integration still require valid locks.
 7. node .journey/journey.mjs manifest breaking.json with an array of {target,kind,before,after,migration}, or [] to explicitly declare none.
-8. node .journey/journey.mjs submit. Human approval is required by default; agents cannot approve themselves.
+8. node .journey/journey.mjs submit. Approval is required by default; a human or an opted-in coordinator must review the exact revision.
 9. Respond to review requests (request JSON can resolve_review). New patches/declarations invalidate approval.
 10. node .journey/journey.mjs integrate returns every current lock and checks the exact approved hash and latest main/cursor.
+    Worker integration also requires the repository's worker merge permission. Agents cannot approve themselves.
 
 The automatically started watcher refreshes leases every 60 seconds and polls events every 5 seconds.
 Check .journey/watcher.log for errors. A failed/expired lease must be reacquired before publication; never assume a notification grants it.
 Watcher stops when the journey integrates or is abandoned. node .journey/journey.mjs watch --background restarts it.
+From a coordinator checkout without an active journey, the watcher polls the approval queue every 5 seconds and uses a separate coordinator cursor.
 node .journey/journey.mjs abandon closes this journey and returns locks.
 For other API actions: node .journey/journey.mjs request request.json. The CLI supplies project and a retry-stable requestId.
 Imported committed local branches and tags are retained (a differing source main is also retained as imported/main); uncommitted edits are not uploaded by import.
@@ -105,26 +113,62 @@ async function setup(dir, connectionPath = profile, journey) {
     return dir;
 }
 async function active() { if (!workspace?.journey) throw new Error('This is a coordinator checkout. Run start <title> <new-directory> to create an isolated task journey.'); const { state } = await get(); const j = state.journeys.find(j => j.id === workspace.journey); if (!j) throw new Error('Journey not found.'); return { state, j, tokens: state.leases.filter(l => l.journey === j.id && l.token).map(l => l.token) }; }
+function eventCursor(value = '0') { const cursor = Number(value); if (!Number.isSafeInteger(cursor) || cursor < 0) throw new Error('invalid_cursor: Supply a nonnegative integer event cursor.'); return String(cursor); }
+function approvals(cursor = '0') { return get({ approvals: '1', since: eventCursor(cursor) }); }
+async function approve() {
+    const [journey, revision, description] = argv;
+    if (!journey || !/^[a-f0-9]{40}$/.test(revision ?? '')) throw new Error('Usage: approve <journey> <exact-40-character-revision> [description]');
+    const inbox = await approvals(), candidate = inbox.queue.find(j => j.journey === journey);
+    if (!candidate) throw new Error('not_in_review: Journey is not in your approval queue.');
+    if (candidate.revision !== revision) throw new Error('stale_review: This is not the current journey revision. Inspect approvals and review the new exact revision.');
+    if (!inbox.canApprove || !candidate.ready || !candidate.reviewable || candidate.approved) throw new Error(`approval_not_ready: ${candidate.reasons.join(', ') || 'This journey is not ready for your approval.'}`);
+    const { user } = await get();
+    if (!user || (user.agent && user.role !== 'coordinator')) throw new Error('forbidden: Only a human or an opted-in repository coordinator can approve.');
+    const authority = user.agent ? 'coordinator' : 'human';
+    say(await post({ action: 'review', journey, kind: 'approve', revision, authority, body: description ?? 'Approved after review' }));
+}
 function dirtyPaths() { return [...new Set([...git('.', ['diff', '--name-only', '-z', 'HEAD']).toString('utf8').split('\0'), ...git('.', ['ls-files', '--others', '--exclude-standard', '-z']).toString('utf8').split('\0')].filter(Boolean))]; }
 async function syncHead(head, hard = false) { authenticatedGit('.', ['fetch', '--quiet', 'origin', `refs/heads/journeys/${workspace.journey}`]); git('.', ['reset', hard ? '--hard' : '--mixed', head]); }
 async function watch() {
     const directory = resolve('.journey');
+    await mkdir(directory, { recursive: true, mode: 0o700 });
     if (argv.includes('--background')) {
         const pidPath = join(directory, 'watcher.pid');
         try { const pid = Number(await readFile(pidPath, 'utf8')); process.kill(pid, 0); return say({ watcher: 'already running', pid }); } catch {}
         const child = spawn(process.execPath, [self, 'watch'], { cwd: process.cwd(), detached: true, stdio: 'ignore', env: { ...process.env, JOURNEY_CONNECTION: profile } }); child.unref();
         await writeFile(pidPath, String(child.pid), { mode: 0o600 }); return say({ watcher: 'started', pid: child.pid });
     }
-    let cursor = Number(await readFile(join(directory, 'cursor'), 'utf8').catch(() => '0')), refreshed = 0;
+    const coordinator = !workspace?.journey;
+    const cursorPath = join(directory, coordinator ? 'coordinator-cursor' : 'cursor');
+    let cursor = eventCursor(await readFile(cursorPath, 'utf8').catch(() => '0')), refreshed = 0;
+    const queuePath = join(directory, 'coordinator-queue.json');
+    let previousQueue = coordinator ? await readFile(queuePath, 'utf8').catch(() => '') : '';
     for (;;) {
         try {
+            if (coordinator) {
+                const inbox = await approvals(cursor);
+                for (const event of inbox.events) await appendFile(join(directory, 'coordinator-inbox.jsonl'), JSON.stringify(event) + '\n', { mode: 0o600 });
+                const snapshot = { policy: inbox.policy, canApprove: inbox.canApprove, head: inbox.head, integrationCursor: inbox.integrationCursor, queue: inbox.queue };
+                const currentQueue = JSON.stringify(snapshot);
+                if (currentQueue !== previousQueue) {
+                    const ready = inbox.queue.filter(j => j.ready).map(j => j.journey);
+                    await appendFile(join(directory, 'coordinator-inbox.jsonl'), JSON.stringify({ type: 'approvals.queue_changed', at: Date.now(), ...snapshot, ready }) + '\n', { mode: 0o600 });
+                    await appendFile(join(directory, 'watcher.log'), `${new Date().toISOString()} coordinator queue changed; ${inbox.queue.length} awaiting review; ready IDs: ${ready.join(', ') || 'none'}\n`, { mode: 0o600 });
+                    await writeFile(queuePath, currentQueue, { mode: 0o600 });
+                    previousQueue = currentQueue;
+                }
+                // Append notifications before advancing the separate coordinator cursor.
+                cursor = eventCursor(inbox.cursor); await writeFile(cursorPath, cursor, { mode: 0o600 });
+                await sleep(5000);
+                continue;
+            }
             const { state, j, tokens } = await active();
             if (['integrated', 'abandoned'].includes(j.status)) break;
             if (Date.now() - refreshed >= 60000 && tokens.length) { await post({ action: 'refresh', journey: j.id, tokens }); refreshed = Date.now(); }
             const inbox = await get({ journey: j.id, since: String(cursor) });
             for (const event of inbox.events) await appendFile(join(directory, 'inbox.jsonl'), JSON.stringify(event) + '\n', { mode: 0o600 });
             // Append first and persist cursor second: after a crash events may repeat, but are not lost.
-            cursor = inbox.cursor; await writeFile(join(directory, 'cursor'), String(cursor), { mode: 0o600 });
+            cursor = eventCursor(inbox.cursor); await writeFile(cursorPath, cursor, { mode: 0o600 });
             const waits = state.waiting.filter(w => w.journey === j.id).length;
             await writeFile(join(directory, 'watcher.log'), `${new Date().toISOString()} polling; ${tokens.length} locks; ${waits} waiting requests\n`, { mode: 0o600 });
         } catch (e) { await appendFile(join(directory, 'watcher.log'), `${new Date().toISOString()} ERROR ${e.message}\n`, { mode: 0o600 }); }
@@ -157,7 +201,7 @@ async function importRepo(dir) {
     }
     await flush(); const result = await importer('finish', session, JSON.stringify({ head, refs })); await setup(dir); say({ ...result, localDirectory: dir, next: `Open Codex in ${dir} and use .journey/CODEX_PROMPT.md` });
 }
-const help = `Journey CLI — Node.js 22+ and Git; no npm install\n\nconnect <downloaded-connection.json>     Store a repository credential privately\nimport <existing-local-git-directory>    Upload committed local history, branches and tags\nsetup <git-directory>                   Add excluded .journey commands and Codex instructions\nclone <new-directory>                   Clone imported repository and add instructions\nstart <title> <new-directory>            Create worker credential, journey and isolated checkout\nstate | status                          Inspect repository or current journey\nchangeset <description>                 Create a described implementation step\nlock <changeset> <path> <start> <end> [--whole]\nlocks <changeset> <scopes.json>          Acquire multiple scopes atomically\npublish <changeset> <description>       Publish all local text edits with current leases\npatch <changeset> <path> <description>\nrun <description> -- <command> [args]    Capture command output and exit code\nrecord <explanation|decision> <text>     Record a captured explanation or decision\nmanifest <breaking.json>                Declare breaking changes (or [] explicitly)\nsubmit | integrate | abandon            Current journey lifecycle\ninbox [cursor] | watch [--background]   Review/availability inbox and renewable leases\nreconcile <dispositions.json>            Merge latest main after assessing events\nrequest <request.json>                  Any protocol action; IDs supplied automatically\nprotocol                               Print the complete agent contract\n\nDownload a new connection to switch repositories; connect selects it.\nCredentials stay in ~/.config/journey (mode 600). .journey/ is locally excluded from Git.\nParallel agents use separate start directories and credentials.\n`;
+const help = `Journey CLI — Node.js 22+ and Git; no npm install\n\nconnect <downloaded-connection.json>     Store a repository credential privately\nimport <existing-local-git-directory>    Upload committed local history, branches and tags\nsetup <git-directory>                   Add excluded .journey commands and Codex instructions\nclone <new-directory>                   Clone imported repository and add instructions\nstart <title> <new-directory>            Create worker credential, journey and isolated checkout\nstate | status                          Inspect repository or current journey\nchangeset <description>                 Create a described implementation step\nlock <changeset> <path> <start> <end> [--whole]\nlocks <changeset> <scopes.json>          Acquire multiple scopes atomically\npublish <changeset> <description>       Publish all local text edits with current leases\npatch <changeset> <path> <description>\nrun <description> -- <command> [args]    Capture command output and exit code\nrecord <explanation|decision> <text>     Record a captured explanation or decision\nmanifest <breaking.json>                Declare breaking changes (or [] explicitly)\nsubmit | integrate | abandon            Current journey lifecycle\ninbox [cursor] | watch [--background]   Worker inbox/leases or coordinator approval feed\napprovals [cursor]                     Inspect submitted journeys and approval readiness\napprove <journey> <exact-revision> [description]\n                                       Approve a reviewed current revision explicitly\nreconcile <dispositions.json>            Merge latest main after assessing events\nrequest <request.json>                  Any protocol action; IDs supplied automatically\nprotocol                               Print the complete agent contract\n\nDownload a new connection to switch repositories; connect selects it.\nCredentials stay in ~/.config/journey (mode 600). .journey/ is locally excluded from Git.\nParallel agents use separate start directories and credentials.\nSettings: worker merge enabled by default; coordinator approval disabled by default.\nAn opted-in coordinator can approve other workers; workers still need exact-revision approval when required.\n`;
 try {
     if (command === 'help' || command === '--help') say(help);
     else if (command === 'protocol') say(instructions);
@@ -188,6 +232,9 @@ try {
             say({ journey: j.journey, directory, agentInstructions: join(directory, '.journey/AGENTS.md') });
         } else if (command === 'state') say(await get());
         else if (command === 'request') say(await post({ ...(workspace?.journey ? { journey: workspace.journey } : {}), ...JSON.parse(await readFile(argv[0], 'utf8')) }));
+        else if (command === 'approvals') say(await approvals(argv[0]));
+        else if (command === 'approve') await approve();
+        else if (command === 'inbox' && !workspace?.journey) say(await approvals(argv[0]));
         else if (command === 'watch') await watch();
         else {
             const { state, j, tokens } = await active();
