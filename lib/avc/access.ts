@@ -6,8 +6,29 @@ export type AccessEnvironment = {
     AVC_ACCESS_OWNER_MAP?: string;
 };
 export type AccessOwner = { id: string; name: string; agent: false };
+export type AccessFailureReason = 'configuration_invalid' | 'token_missing' | 'token_format_invalid' | 'jwt_header_invalid' | 'signing_keys_unavailable' | 'signature_invalid' | 'identity_claims_invalid' | 'audience_denied' | 'time_claims_invalid' | 'owner_unmapped' | 'verification_exception';
+export type AccessSigningKeyFailure = 'none' | 'fetch_failed' | 'http_error' | 'response_invalid' | 'key_import_failed' | 'key_missing' | 'refresh_throttled' | 'timeout' | 'capacity';
+/** Fixed diagnostic fields only; never include token, claim, identity or error values. */
+export type AccessDiagnostic = {
+    event: 'access_denied';
+    reason: AccessFailureReason;
+    signingKeyFailure: AccessSigningKeyFailure;
+    assertionPresent: boolean;
+    authorizationCookiePresent: boolean;
+    authorizationCookieUnambiguous: boolean;
+    typPresent: boolean;
+    typValid: boolean;
+    typePresent: boolean;
+    typeValid: boolean;
+    nbfPresent: boolean;
+    nbfValid: boolean;
+};
 type Configuration = { issuer: string; audience: string; owners: Map<string, string> };
 type CachedKeys = { keys: Map<string, CryptoKey>; fetched: number };
+class SigningKeyFailure extends Error {
+    readonly stage: Exclude<AccessSigningKeyFailure, 'none'>;
+    constructor(stage: Exclude<AccessSigningKeyFailure, 'none'>) { super('Access signing key unavailable.'); this.stage = stage; }
+}
 const encoder = new TextEncoder();
 const decoder = new TextDecoder('utf-8', { fatal: true });
 const MAX_TOKEN_BYTES = 16384, MAX_JWKS_BYTES = 65536;
@@ -86,19 +107,21 @@ async function boundedJSON(response: Response, signal: AbortSignal): Promise<unk
 export class AccessVerifier {
     private fetcher: typeof fetch;
     private clock: () => number;
+    private diagnostic?: (diagnostic: Readonly<AccessDiagnostic>) => void;
     private cache = new Map<string, CachedKeys>();
     private refreshing = new Map<string, Promise<CachedKeys>>();
     private attempted = new Map<string, number>();
-    constructor(options: { fetch?: typeof fetch; now?: () => number } = {}) {
+    constructor(options: { fetch?: typeof fetch; now?: () => number; diagnostic?: (diagnostic: Readonly<AccessDiagnostic>) => void } = {}) {
         this.fetcher = options.fetch ?? ((...args) => fetch(...args));
         this.clock = options.now ?? Date.now;
+        this.diagnostic = options.diagnostic;
     }
     private async refresh(issuer: string): Promise<CachedKeys> {
         const running = this.refreshing.get(issuer);
         if (running) return running;
-        if (this.refreshing.size >= 4) throw new Error('Access key refresh capacity reached.');
+        if (this.refreshing.size >= 4) throw new SigningKeyFailure('capacity');
         const now = this.clock(), previous = this.attempted.get(issuer);
-        if (previous !== undefined && now - previous < REFRESH_INTERVAL) throw new Error('Access keys unavailable.');
+        if (previous !== undefined && now - previous < REFRESH_INTERVAL) throw new SigningKeyFailure('refresh_throttled');
         this.attempted.set(issuer, now);
         // A deployment uses one issuer; keep even invalid configuration changes bounded.
         if (this.attempted.size > 4) {
@@ -108,20 +131,29 @@ export class AccessVerifier {
         const promise = (async () => {
             const controller = new AbortController();
             let timeout: ReturnType<typeof setTimeout>;
-            const expired = new Promise<never>((_, reject) => { timeout = setTimeout(() => { controller.abort(); reject(new Error('Access key request timed out.')); }, FETCH_TIMEOUT); });
+            const expired = new Promise<never>((_, reject) => { timeout = setTimeout(() => { controller.abort(); reject(new SigningKeyFailure('timeout')); }, FETCH_TIMEOUT); });
             const operation = (async () => {
-                const response = await this.fetcher(issuer + '/cdn-cgi/access/certs', { redirect: 'error', signal: controller.signal, headers: { Accept: 'application/json' } });
-                const data = await boundedJSON(response, controller.signal) as { keys?: unknown };
-                if (!data || !Array.isArray(data.keys) || !data.keys.length || data.keys.length > 32) throw new Error('Invalid Access keys.');
+                let response: Response;
+                // Pinned Workerd 1.20260515.1 rejects redirect: 'error'. Manual
+                // returns redirects without following them; !response.ok denies them.
+                try { response = await this.fetcher(issuer + '/cdn-cgi/access/certs', { redirect: 'manual', signal: controller.signal, headers: { Accept: 'application/json' } }); }
+                catch { throw new SigningKeyFailure(controller.signal.aborted ? 'timeout' : 'fetch_failed'); }
+                if (!response.ok) throw new SigningKeyFailure('http_error');
+                let data: { keys?: unknown };
+                try { data = await boundedJSON(response, controller.signal) as { keys?: unknown }; }
+                catch { throw new SigningKeyFailure(controller.signal.aborted ? 'timeout' : 'response_invalid'); }
+                if (!data || !Array.isArray(data.keys) || !data.keys.length || data.keys.length > 32) throw new SigningKeyFailure('response_invalid');
                 const keys = new Map<string, CryptoKey>();
                 for (const candidate of data.keys) {
-                    if (!candidate || typeof candidate !== 'object') throw new Error('Invalid Access keys.');
+                    if (!candidate || typeof candidate !== 'object') throw new SigningKeyFailure('response_invalid');
                     const key = candidate as Record<string, unknown>;
-                    if (typeof key.kid !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(key.kid) || keys.has(key.kid)) throw new Error('Invalid Access key ID.');
-                    if (key.kty !== 'RSA' || (key.alg !== undefined && key.alg !== 'RS256') || (key.use !== undefined && key.use !== 'sig') || typeof key.n !== 'string' || typeof key.e !== 'string') throw new Error('Unsupported Access key.');
+                    if (typeof key.kid !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(key.kid) || keys.has(key.kid)) throw new SigningKeyFailure('response_invalid');
+                    if (key.kty !== 'RSA' || (key.alg !== undefined && key.alg !== 'RS256') || (key.use !== undefined && key.use !== 'sig') || typeof key.n !== 'string' || typeof key.e !== 'string') throw new SigningKeyFailure('response_invalid');
                     const modulus = bytes(key.n), exponent = bytes(key.e);
-                    if (modulus.length < 256 || modulus.length > 1024 || exponent.length > 8) throw new Error('Unsupported Access key size.');
-                    const imported = await crypto.subtle.importKey('jwk', { kty: 'RSA', n: key.n, e: key.e, alg: 'RS256', ext: true }, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']);
+                    if (modulus.length < 256 || modulus.length > 1024 || exponent.length > 8) throw new SigningKeyFailure('response_invalid');
+                    let imported: CryptoKey;
+                    try { imported = await crypto.subtle.importKey('jwk', { kty: 'RSA', n: key.n, e: key.e, alg: 'RS256', ext: true }, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']); }
+                    catch { throw new SigningKeyFailure('key_import_failed'); }
                     keys.set(key.kid, imported);
                 }
                 controller.signal.throwIfAborted();
@@ -141,32 +173,63 @@ export class AccessVerifier {
         let cached = this.cache.get(issuer);
         if (!cached || this.clock() - cached.fetched >= KEY_TTL || !cached.keys.has(kid)) cached = await this.refresh(issuer);
         const key = cached.keys.get(kid);
-        if (!key) throw new Error('Unknown Access signing key.');
+        if (!key) throw new SigningKeyFailure('key_missing');
         return key;
     }
     async principal(request: Request, env: AccessEnvironment): Promise<AccessOwner | null> {
+        const fields: Omit<AccessDiagnostic, 'event' | 'reason'> = {
+            signingKeyFailure: 'none',
+            assertionPresent: false, authorizationCookiePresent: false, authorizationCookieUnambiguous: false,
+            typPresent: false, typValid: false, typePresent: false, typeValid: false, nbfPresent: false, nbfValid: false,
+        };
+        const deny = (reason: AccessFailureReason): null => {
+            // A diagnostic sink must never change an authentication decision.
+            try { void Promise.resolve(this.diagnostic?.(Object.freeze({ event: 'access_denied', reason, ...fields }))).catch(() => {}); } catch { }
+            return null;
+        };
         try {
-            const config = configuration(env), token = requestToken(request);
-            if (!token || token.length > MAX_TOKEN_BYTES) return null;
+            fields.assertionPresent = request.headers.has('Cf-Access-Jwt-Assertion');
+            const cookies = (request.headers.get('cookie') ?? '').split(';').map(part => part.trim()).filter(part => part.startsWith('CF_Authorization='));
+            fields.authorizationCookiePresent = cookies.length > 0;
+            fields.authorizationCookieUnambiguous = cookies.length === 1;
+            let config: Configuration;
+            try { config = configuration(env); } catch { return deny('configuration_invalid'); }
+            const token = requestToken(request);
+            if (!token) return deny('token_missing');
+            if (token.length > MAX_TOKEN_BYTES) return deny('token_format_invalid');
             const parts = token.split('.');
-            if (parts.length !== 3) return null;
-            const header = json(parts[0]), claims = json(parts[1]);
-            if (header.alg !== 'RS256' || header.typ !== 'JWT' || typeof header.kid !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(header.kid) || ['crit', 'b64', 'jku', 'jwk', 'x5u'].some(field => Object.hasOwn(header, field))) return null;
-            const signature = bytes(parts[2]);
-            if (signature.byteLength < 256 || signature.byteLength > 1024) return null;
-            const key = await this.key(config.issuer, header.kid);
-            if (!await crypto.subtle.verify('RSASSA-PKCS1-v1_5', key, signature, encoder.encode(parts[0] + '.' + parts[1]))) return null;
+            if (parts.length !== 3) return deny('token_format_invalid');
+            let header: Record<string, unknown>, claims: Record<string, unknown>, signature: Uint8Array<ArrayBuffer>;
+            try { header = json(parts[0]); claims = json(parts[1]); signature = bytes(parts[2]); } catch { return deny('token_format_invalid'); }
+            // RFC 7519 section 5.1 makes typ optional. Cloudflare may omit it;
+            // a supplied label must still be JWT, and all cryptographic checks apply.
+            fields.typPresent = Object.hasOwn(header, 'typ'); fields.typValid = !fields.typPresent || header.typ === 'JWT';
+            fields.typePresent = Object.hasOwn(claims, 'type'); fields.typeValid = claims.type === 'app';
+            fields.nbfPresent = Object.hasOwn(claims, 'nbf'); fields.nbfValid = typeof claims.nbf === 'number' && Number.isSafeInteger(claims.nbf) && claims.nbf >= 0;
+            if (header.alg !== 'RS256' || !fields.typValid || typeof header.kid !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(header.kid) || ['crit', 'b64', 'jku', 'jwk', 'x5u'].some(field => Object.hasOwn(header, field))) return deny('jwt_header_invalid');
+            if (signature.byteLength < 256 || signature.byteLength > 1024) return deny('signature_invalid');
+            let key: CryptoKey;
+            try { key = await this.key(config.issuer, header.kid); }
+            catch (error) { fields.signingKeyFailure = error instanceof SigningKeyFailure ? error.stage : 'response_invalid'; return deny('signing_keys_unavailable'); }
+            if (!await crypto.subtle.verify('RSASSA-PKCS1-v1_5', key, signature, encoder.encode(parts[0] + '.' + parts[1]))) return deny('signature_invalid');
             const now = this.clock() / 1000;
-            if (claims.iss !== config.issuer || claims.type !== 'app' || typeof claims.sub !== 'string' || !claims.sub || claims.sub.length > 255 || typeof claims.email !== 'string' || claims.email.length > 254) return null;
+            if (claims.iss !== config.issuer || claims.type !== 'app' || typeof claims.sub !== 'string' || !claims.sub || claims.sub.length > 255 || typeof claims.email !== 'string' || claims.email.length > 254) return deny('identity_claims_invalid');
             const audiences = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
-            if (!audiences.length || audiences.length > 8 || !audiences.every(audience => typeof audience === 'string') || !audiences.includes(config.audience)) return null;
-            if (![claims.exp, claims.iat, claims.nbf].every(value => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0)) return null;
+            if (!audiences.length || audiences.length > 8 || !audiences.every(audience => typeof audience === 'string') || !audiences.includes(config.audience)) return deny('audience_denied');
+            if (![claims.exp, claims.iat, claims.nbf].every(value => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0)) return deny('time_claims_invalid');
             const exp = claims.exp as number, iat = claims.iat as number, nbf = claims.nbf as number;
-            if (exp <= now || iat > now + 5 || nbf > now + 5 || exp <= iat || exp <= nbf) return null;
+            if (exp <= now || iat > now + 5 || nbf > now + 5 || exp <= iat || exp <= nbf) return deny('time_claims_invalid');
             const id = config.owners.get(claims.email.toLowerCase());
-            return id ? { id, name: claims.email, agent: false } : null;
-        } catch { return null; }
+            return id ? { id, name: claims.email, agent: false } : deny('owner_unmapped');
+        } catch { return deny('verification_exception'); }
     }
 }
-const verifier = new AccessVerifier();
+// Enum-bounded suppression avoids flooding production logs with repeated denials.
+const diagnosticTimes = new Map<AccessFailureReason, number>();
+const verifier = new AccessVerifier({ diagnostic: diagnostic => {
+    const now = Date.now(), previous = diagnosticTimes.get(diagnostic.reason);
+    if (previous !== undefined && now - previous < REFRESH_INTERVAL) return;
+    diagnosticTimes.set(diagnostic.reason, now);
+    console.warn(JSON.stringify(diagnostic));
+} });
 export const accessPrincipal = (request: Request, env: AccessEnvironment) => verifier.principal(request, env);
