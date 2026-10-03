@@ -4,6 +4,7 @@ import { GitStore } from '@/lib/avc/git';
 import { type State, type Files, type Journey, type BreakingChange, ProtocolError, insist, emit, getJourney, activeJourney, acquire, recordPatch, checkTokens, validateSubmission, finalizeIntegration, mergeFiles, remap, diff, publicState, notifyWaiters, pendingIntegrations, expire, updatePolicy, approvalAuthority, validateIntegrationAuthority, approvalInbox } from '@/lib/avc/core';
 export const dynamic = 'force-dynamic';
 import { submitForReview, reconciliationPlan, recordReconciliation } from '@/lib/avc/core';
+import { integrationFiles } from '@/lib/avc/integration';
 const sample: Files = { 'src/users.rs': 'pub struct User {\n    pub id: u64,\n    pub name: String,\n}\n\npub fn find_user(id: u64) -> Option<User> {\n    if id == 1 {\n        Some(User { id, name: "Ada".into() })\n    } else {\n        None\n    }\n}\n\npub fn display_name(user: &User) -> String {\n    user.name.clone()\n}\n', 'Cargo.toml': '[package]\nname = "journey-demo"\nversion = "0.1.0"\nedition = "2021"\n\n[lib]\npath = "src/users.rs"\n', 'README.md': '# Journey demo\n\nA small Rust library for trying concurrent range locks and recorded changesets.\n\nRun cargo test locally. CI is optional.\n' };
 const field = (v: unknown, name: string, max = 4000) => { insist(typeof v === 'string' && v.trim().length > 0 && v.length <= max, 'invalid_input', `${name} is required (maximum ${max} characters).`, 400); return v.trim(); };
 function error(e: unknown) { const p = e as ProtocolError; return Response.json({ error: p.message ?? 'Unexpected server error.', code: p.code ?? 'server_error', details: p.details }, { status: p.status ?? 500 }); }
@@ -241,7 +242,7 @@ export async function POST(req: Request) {
                     case 'integrate': {
                         insist(j.status === 'review', 'not_in_review', 'Submit the journey for review first.');
                         insist(b.revision === j.head && b.head === s.head && b.cursor === s.integrationCursor, 'stale_integration', 'The candidate or integration head changed.');
-                        checkTokens(s, j, b.tokens ?? []);
+                        if (user.agent) checkTokens(s, j, b.tokens ?? []);
                         validateSubmission(s, j);
                         validateIntegrationAuthority(s, j, user);
                         break;
@@ -260,20 +261,7 @@ export async function POST(req: Request) {
                 // Integration validates the final diff against canonical lock coordinates before atomically advancing the state.
                 if (action === 'integrate') {
                     const canonical = await git.files(s.head), base = await git.files(j.base), ours = await git.files(j.head);
-                    const held = checkTokens(s, j, b.tokens ?? []);
-                    for (const path of new Set([...Object.keys(base), ...Object.keys(ours)])) {
-                        if (base[path] === ours[path])
-                            continue;
-                        if (Object.hasOwn(base, path) !== Object.hasOwn(ours, path))
-                            insist(held.some(l => l.path === path && l.whole), 'whole_file_required', 'Creating or deleting files requires current whole-file leases.');
-                        const changes = diff(base[path] ?? '', ours[path] ?? '');
-                        const other = diff(base[path] ?? '', canonical[path] ?? '');
-                        for (const h of changes) {
-                            const [start, end] = remap(h.start, h.start + h.count, other);
-                            insist(held.some(l => l.path === path && (l.whole || (start >= l.canonicalStart && end <= l.canonicalEnd))), 'lock_coverage', `Final changes to ${path} are not covered by current leases.`);
-                        }
-                    }
-                    const merged = mergeFiles(base, ours, canonical);
+                    const merged = integrationFiles(s, j, canonical, base, ours, b.tokens ?? [], !user.agent);
                     const c = await git.save(merged, s.head, j.title, user.name);
                     s.revisions[c.oid] = c.meta;
                     const e = finalizeIntegration(s, j, c.oid, user.id, canonical, merged);

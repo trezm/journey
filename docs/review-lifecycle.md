@@ -1,6 +1,6 @@
 # Review after accepted work
 
-A published Journey can be submitted for review without active editing locks. Submission still requires its current revision, at least one published patch, an explicit compatibility declaration, reconciliation with current main, and resolved change requests. Publishing edits and integrating a Journey retain their existing lock checks.
+A published Journey can be submitted for review without active editing locks. Submission still requires its current revision, at least one published patch, an explicit compatibility declaration, reconciliation with current main, and resolved change requests. Publishing edits and agent integration still require current editing leases and coverage. The authenticated repository owner can integrate reviewed immutable work without worker editing leases, subject to the repository's exact-revision approval policy. Active reservations held by other Journeys still protect overlapping changes, including file creation and deletion.
 
 When every intervening integration is marked **unaffected**, reconciliation retains a valid compatibility declaration. A Journey already submitted for review stays in review; a Journey still in progress stays in progress. Reconciliation invalidates earlier approvals, so the new exact revision must be approved before integration when approval is required. Outstanding change requests remain unresolved and continue to block approval and integration.
 
