@@ -12,7 +12,7 @@ Working MVP of journey-based version control. A journey contains described chang
 - Append-only review, patch, lease and integration events; per-journey inboxes with replay cursors.
 - Required breaking-change declarations (explicit empty lists allowed), per-integration dispositions, stale-head rejection and repository-state compare-and-swap publication.
 - Optional approval policy. Builds and tests are deliberately outside the protocol.
-- Email/password accounts and hashed sessions for standalone hosting; private hosted preview also accepts its trusted sign-in identity.
+- Email/password accounts and hashed sessions for Cloudflare hosting. Public identity headers are never accepted as authentication.
 
 ## Import and connect Codex
 
@@ -37,13 +37,15 @@ Imported untouched non-text/large files and modes remain in every generated comm
 
 ## Development
 
-Node 24+ and Git are required. Install with the included dependency installer, generate migrations with `npm run db:generate`, build with `npm run build`, and apply the SQL files under `drizzle/` in order to a local D1 database with Wrangler. `npm start` serves the built Worker locally; `npm run dev` serves the development interface. On the managed Sites runtime use its supervised preview.
+Node.js 22.13+ and Git are required. Install with `pnpm install --frozen-lockfile`, initialize local D1 with `pnpm db:migrate:local`, and run `pnpm dev`. `pnpm deploy:check` builds the complete Cloudflare Worker and validates its bundle without publishing. `pnpm start --port 4173` serves the built Worker locally; both use simulated D1/R2 under `.wrangler/state`.
 
-The Worker needs `DB` (D1) and `BUCKET` (R2). Private-host connection downloads also need the secret `JOURNEY_SITE_SERVICE_TOKEN`. `.openai/hosting.json` declares these for Sites hosting. For standalone Cloudflare hosting, replace the placeholder local resources in generated `dist/server/wrangler.json` with your real D1 database and R2 bucket before deploying. Do not trust forwarded `oai-authenticated-user-id` headers on a standalone public deployment: strip them at your ingress, or remove that identity branch from `lib/avc/auth.ts` and use email/password exclusively.
+Deploy to your own Cloudflare account using the checked-in `wrangler.jsonc`, with `DB` (D1), `BUCKET` (R2) and the existing Drizzle migrations. Configure the actual resource IDs/names before `pnpm db:migrate:remote` and `pnpm deploy`; these commands reject the local placeholder D1 ID. The app uses email/password sessions and repository-scoped agent tokens and needs no Sites runtime, connectors or platform service secret.
+
+Follow [the Cloudflare deployment and migration guide](docs/cloudflare.md) for resource setup, domains, CI, moving existing D1/R2 data, mapping former ChatGPT owners and reconnecting local agents. Existing hosted repositories are not copied automatically when a new Worker is deployed.
 
 ## API
 
-All agent requests send `Authorization: Bearer <agent-token>`. A private hosted Site additionally requires its platform service credential in `OAI-Sites-Authorization`; the platform consumes that header. The application agent token remains separate.
+All agent requests send `Authorization: Bearer <agent-token>`. Standalone Cloudflare hosting uses the application token directly. Old CLI profiles retain optional private-Site support for migration; newly downloaded connections do not include platform credentials.
 
 - `GET /api/avc`: signed-in human's repository list.
 - `GET /api/avc?project=ID`: state and revisions. Agents see only their own lock tokens.
@@ -94,7 +96,7 @@ node cli/agent.mjs patch JOURNEY_ID CHANGESET_ID src/users.rs ./users.rs 'Handle
 
 The app stores actual Git objects, not synthetic revision labels. `GET /api/git/PROJECT_ID/` supports Git dumb-HTTP cloning with an agent token as the Basic-auth password or a bearer header. It exposes main and journey refs; writes must use the journey API.
 
-The hosted preview uses R2 Git-object storage. **Cloudflare Artifacts is not connected automatically.** Create an Artifacts repository, obtain its remote and write token, then set `ARTIFACTS_REMOTE` and `ARTIFACTS_TOKEN` alongside the AVC environment variables:
+Cloudflare hosting uses R2 Git-object storage. **Cloudflare Artifacts is not connected automatically.** Create an Artifacts repository, obtain its remote and write token, then set `ARTIFACTS_REMOTE` and `ARTIFACTS_TOKEN` alongside the AVC environment variables:
 
 ```sh
 node cli/sync-artifacts.mjs

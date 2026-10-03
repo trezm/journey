@@ -31,9 +31,8 @@ export async function principal(req: Request): Promise<Principal | null> {
             return { id: 'agent:' + hash.slice(0, 16), name: a.name, agent: true, project: a.project, role: a.role };
         return null;
     }
-    const user = req.headers.get('oai-authenticated-user-id');
-    if (user)
-        return { id: 'siwc:' + user, name: req.headers.get('oai-authenticated-user-email') ?? 'Reviewer', agent: false };
+    // Public Workers accept only application sessions and repository tokens.
+    // Forwarded identity headers are client-controlled and never authenticate.
     const cookie = req.headers.get('cookie')?.split(';').map(x => x.trim()).find(x => x.startsWith('avc_session='))?.slice(12);
     if (!cookie)
         return null;

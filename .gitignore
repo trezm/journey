@@ -44,3 +44,8 @@ next-env.d.ts
 /.codex/
 /outputs/
 /work/
+
+# Cloudflare local secrets and package-manager cache
+.dev.vars*
+!.dev.vars.example
+/.pnpm-store/
