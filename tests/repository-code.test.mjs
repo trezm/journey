@@ -129,6 +129,7 @@ function renderCodeWorkspace(options = {}) {
         };
         if (name === '@/components/journey-sidebar') return { JourneySidebar: () => null };
         if (name === '@/components/git-sync-warning') return { GitSyncWarning: () => null };
+        if (name === '@/components/cli-install') return { CliInstall: () => null };
         if (name === '@/hooks/use-workspace-route') return { useWorkspaceRoute: () => ({ project: 'repo', selected: options.selected ?? '', tab: options.tab ?? 'code', modeChoice: { project: 'repo', mode: options.mode ?? 'repository' }, pathChoice: { project: 'repo', path: 'README.md' }, setProject: () => {}, setSelected: () => {}, setTab: () => {}, setModeChoice: () => {}, setPathChoice: () => {}, hrefFor: () => '/repositories/repo', followLink: () => {} }) };
         if (name === '@/lib/repository-code') return { codeRevision, codePath, repositorySelection };
         if (name === '@/lib/avc/review') return reviewHelpers;

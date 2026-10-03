@@ -18,13 +18,20 @@ Working MVP of journey-based version control. A journey contains described chang
 ## Import and connect Codex
 
 1. Create an empty repository in the workspace (the Rust example is optional).
-2. In **Connect & import**, download `journey.mjs` and `journey-connection.json`.
-3. With Node.js 22+ and Git installed:
+2. With Node.js 22+, Git, and curl installed, copy the one-line installer from **Connect & import**. On the production host (once the installer rollout is complete):
 
 ```sh
-node journey.mjs connect journey-connection.json
-node journey.mjs import /path/to/existing/repository
+curl -fsSL https://journey.peter-s-mertz.workers.dev/install.sh | bash
 ```
+
+Follow the printed PATH instruction if `~/.local/bin` is not already on your PATH. Then download `journey-connection.json` from **Connect & import** and run:
+
+```sh
+journey connect journey-connection.json
+journey import /path/to/existing/repository
+```
+
+The installer uses the existing Node CLI and adds the `journey` command without npm or sudo. Rerun to update. See [installation, upgrades, removal, and hosting](docs/cli-install.md) for custom origins and the production Access requirements.
 
 The importer verifies and uploads loose Git objects in retryable batches. It retains all committed **local** branches and tags and their reachable histories, including binaries, executable bits, symlinks and submodule pointers. The selected local HEAD becomes canonical Journey main. A differing source main is retained under imported/main (with a numeric suffix if that name exists). Remote-tracking refs, uncommitted working edits, Git LFS payloads and submodule repository contents are not uploaded. Unshallow shallow clones first. Initial import limits: 50,000 SHA-1 objects, 1,000 refs, 20 MB per object and 300 MB uncompressed total.
 
