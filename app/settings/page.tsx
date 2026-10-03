@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useWorkspaceRoute } from '@/hooks/use-workspace-route';
 import { ArrowLeft, GitBranch, GitMerge, ShieldCheck, UserCheck, Settings, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
@@ -18,16 +19,17 @@ async function request<T>(url: string, init?: RequestInit) {
 }
 
 export default function RepositorySettings() {
-    const [project, setProject] = useState(''), [repository, setRepository] = useState<Repository | null>(null);
+    const { project, hrefFor } = useWorkspaceRoute();
+    const [repository, setRepository] = useState<Repository | null>(null);
     const [saved, setSaved] = useState<Policy | null>(null), [draft, setDraft] = useState<Policy | null>(null);
     const [loading, setLoading] = useState(true), [saving, setSaving] = useState(false), [error, setError] = useState(''), [notice, setNotice] = useState('');
     useEffect(() => {
         let active = true;
         void Promise.resolve().then(async () => {
             if (!active) return;
-            const id = new URLSearchParams(window.location.search).get('project');
+            const id = project;
             if (!id) { setError('Open settings from a repository workspace.'); setLoading(false); return; }
-            setProject(id);
+            setLoading(true); setRepository(null); setSaved(null); setDraft(null); setError(''); setNotice('');
             try {
                 const data = await request<Repository>(`/api/avc?project=${encodeURIComponent(id)}`);
                 if (!active) return;
@@ -37,7 +39,7 @@ export default function RepositorySettings() {
             finally { if (active) setLoading(false); }
         });
         return () => { active = false; };
-    }, []);
+    }, [project]);
     const editable = repository && !repository.user.agent;
     const changed = saved && draft && Object.keys(saved).some(key => saved[key as keyof Policy] !== draft[key as keyof Policy]);
     function change(key: keyof Policy, value: boolean) { setDraft(p => p ? { ...p, [key]: value } : p); setNotice(''); }
@@ -55,7 +57,7 @@ export default function RepositorySettings() {
         finally { setSaving(false); }
     }
     return <main className={styles.page}>
-        <header className={styles.header}><Link href="/" className={styles.brand}><span><GitBranch size={22}/></span>Journey</Link><Link href={project ? `/?project=${encodeURIComponent(project)}` : '/'} className={styles.back}><ArrowLeft size={16}/>Back to workspace</Link></header>
+        <header className={styles.header}><Link href="/" className={styles.brand}><span><GitBranch size={22}/></span>Journey</Link><a href={hrefFor({ journey: '', tab: 'code', mode: 'repository', path: '' })} className={styles.back}><ArrowLeft size={16}/>Back to workspace</a></header>
         <div className={styles.content}>
             <div className={styles.heading}><div className={styles.eyebrow}>{repository?.state.name ?? 'REPOSITORY'}</div><h1><Settings size={25}/>Repository settings</h1><p>Choose how your workers merge changes and how your coordinator reviews them.</p></div>
             {loading && <p role="status" className={styles.loading}>Loading settings…</p>}
@@ -65,8 +67,8 @@ export default function RepositorySettings() {
                 <div className={styles.cardHeading}><ShieldCheck size={20}/><div><h2>Repository permissions</h2><p>These settings apply to this repository and all of its journeys.</p></div></div>
                 {!editable && <p className={styles.ownerOnly}>Only the repository owner can change these settings.</p>}
                 <div className={styles.row}><div className={styles.icon}><GitMerge size={20}/></div><div className={styles.copy}><label htmlFor="worker-merge">Allow workers to merge</label><p id="worker-merge-help">Workers can merge their own submitted journeys after required approval. Current locks and reconciliation are still required. When off, the owner merges completed journeys.</p></div><Switch id="worker-merge" aria-describedby="worker-merge-help" checked={draft.allowWorkerMerge} onCheckedChange={v => change('allowWorkerMerge', v)} disabled={!editable || saving}/></div>
-                <div className={styles.row}><div className={styles.icon}><UserCheck size={20}/></div><div className={styles.copy}><label htmlFor="coordinator-approval">Allow the coordinator to approve</label><p id="coordinator-approval-help">A coordinator can review and approve other workers’ submitted journeys. It cannot approve its own work. Turning this off cancels its existing approvals; those journeys need a new approval when approval is required.</p></div><Switch id="coordinator-approval" aria-describedby="coordinator-approval-help" checked={draft.allowCoordinatorApproval} onCheckedChange={v => change('allowCoordinatorApproval', v)} disabled={!editable || saving}/></div>
-                <div className={styles.row}><div className={styles.icon}><ShieldCheck size={20}/></div><div className={styles.copy}><label htmlFor="require-approval">Require approval before merge</label><p id="require-approval-help">Every journey needs approval of its exact current revision by the owner or an allowed coordinator. New patches or compatibility declarations require another review.</p></div><Switch id="require-approval" aria-describedby="require-approval-help" checked={draft.requireApproval} onCheckedChange={v => change('requireApproval', v)} disabled={!editable || saving}/></div>
+                <div className={styles.row}><div className={styles.icon}><UserCheck size={20}/></div><div className={styles.copy}><label htmlFor="coordinator-approval">Allow the coordinator to approve</label><p id="coordinator-approval-help">A coordinator can review and approve other workers’ submitted journeys. It cannot approve its own work. Turning this off cancels its existing approvals; those journeys need a new approval before owner integration or when worker approval is required.</p></div><Switch id="coordinator-approval" aria-describedby="coordinator-approval-help" checked={draft.allowCoordinatorApproval} onCheckedChange={v => change('allowCoordinatorApproval', v)} disabled={!editable || saving}/></div>
+                <div className={styles.row}><div className={styles.icon}><ShieldCheck size={20}/></div><div className={styles.copy}><label htmlFor="require-approval">Require approval for worker merges</label><p id="require-approval-help">Workers need approval of the exact current revision by the owner or an allowed coordinator. The Integrate button always requires approval. New patches or compatibility declarations require another review.</p></div><Switch id="require-approval" aria-describedby="require-approval-help" checked={draft.requireApproval} onCheckedChange={v => change('requireApproval', v)} disabled={!editable || saving}/></div>
                 <footer className={styles.footer}><p>{changed ? 'You have unsaved changes.' : 'Settings are up to date.'}</p><div><Button type="button" variant="outline" disabled={!changed || saving} onClick={() => { setDraft(saved); setNotice(''); }}>Discard changes</Button><Button type="submit" disabled={!editable || !changed || saving}>{saving ? 'Saving…' : 'Save settings'}</Button></div></footer>
             </form>}
             {!loading && !repository && <Link href="/" className={styles.recovery}>Open your workspace to sign in and select a repository.</Link>}

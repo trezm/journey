@@ -113,19 +113,21 @@ test('revision switching ignores stale file snapshots, and load errors can be re
 // Exercise the actual workspace branch with a hydrated, imported repository
 // that has no journeys. Mock only its data hooks and visual primitives.
 function renderCodeWorkspace(options = {}) {
-    const state = { id: 'repo', name: 'journey', head: 'main', journeys: options.journeys ?? [], leases: [], events: [], waiting: [] };
+    const state = { id: 'repo', name: 'journey', head: 'main', journeys: options.journeys ?? [], leases: [], events: [], waiting: [], ...options.state };
     const require = createRequire(import.meta.url);
     const source = readFileSync(new URL('../app/page.tsx', import.meta.url), 'utf8');
     const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } }).outputText;
     let index = 0;
-    const initial = [{ id: 'user', name: 'Reader' }, false, [{ id: 'repo', name: 'journey' }], 'repo', options.selected ?? '', options.tab ?? 'code', { project: 'repo', mode: options.mode ?? 'repository' }, { project: 'repo', path: 'README.md' }, options.draft ?? { revision: '', path: '', content: '' }];
+    const initial = [{ id: 'user', name: 'Reader' }, false, [{ id: 'repo', name: 'journey' }], options.draft ?? { revision: '', path: '', content: '' }];
     const testModule = { exports: {} };
     const mockRequire = name => {
-        if (name === 'react') return { ...React, useState: value => [index < initial.length ? initial[index++] : (index++, value), () => {}], useEffect: () => {}, useCallback: callback => callback };
+        if (name === 'react') return { ...React, useState: value => { const at = index++; return [at < initial.length ? initial[at] : value, next => options.onState?.(at, next)]; }, useEffect: (effect, dependencies) => options.onEffect?.(effect, dependencies), useCallback: callback => callback };
         if (name === '@/hooks/use-repository') return {
             useRepository: () => ({ state, setState: options.setRepositoryState ?? (() => {}), reload: options.reload ?? (async () => {}), status: 'ready', error: '' }),
             useRepositoryFiles: () => ({ key: 'repo:main', status: 'ready', error: '', files: { 'README.md': 'Imported repository code' }, reload: async () => {} }),
         };
+        if (name === '@/components/journey-sidebar') return { JourneySidebar: () => null };
+        if (name === '@/hooks/use-workspace-route') return { useWorkspaceRoute: () => ({ project: 'repo', selected: options.selected ?? '', tab: options.tab ?? 'code', modeChoice: { project: 'repo', mode: options.mode ?? 'repository' }, pathChoice: { project: 'repo', path: 'README.md' }, setProject: () => {}, setSelected: () => {}, setTab: () => {}, setModeChoice: () => {}, setPathChoice: () => {}, hrefFor: () => '/repositories/repo', followLink: () => {} }) };
         if (name === '@/lib/repository-code') return { codeRevision, codePath, repositorySelection };
         if (name === '@/lib/avc/review') return reviewHelpers;
         if (name === '@/lib/avc/client') return { ...requestHelpers, jsonFetch: options.requestJson ?? requestHelpers.jsonFetch };
@@ -180,4 +182,55 @@ test('workspace mutations refresh metadata through the repository-scoped loader'
     assert.equal(typeof submit, 'function');
     await submit();
     assert.deepEqual(calls, ['mutation', 'repository reload']);
+});
+
+test('an unavailable journey deep link does not display a different journey or repository revision', () => {
+    const html = renderCodeWorkspace({ selected: 'missing' });
+    assert.match(html, /Journey not found/);
+    assert.doesNotMatch(html, /Imported repository code/);
+});
+
+test('Integrate button requires a current authorized approval even when worker approval is optional', () => {
+    const approval = { id: 'approval', kind: 'approve', revision: 'head', authority: 'human', body: 'Reviewed', at: 0 };
+    for (const [label, reviews, allowCoordinatorApproval, disabled] of [
+        ['missing', [], false, true],
+        ['old revision', [{ ...approval, revision: 'old' }], false, true],
+        ['revoked', [{ ...approval, resolved: true }], false, true],
+        ['disallowed coordinator', [{ ...approval, authority: 'coordinator' }], false, true],
+        ['allowed coordinator', [{ ...approval, authority: 'coordinator' }], true, false],
+        ['current owner', [approval], false, false],
+    ]) {
+        let integrate;
+        const journey = { id: 'j', head: 'head', status: 'review', changesets: [], reviews, manifest: [], manifestDeclared: true };
+        renderCodeWorkspace({
+            selected: 'j', tab: 'review', journeys: [journey],
+            state: { requireApproval: false, allowCoordinatorApproval, leases: [{ journey: 'j', retained: true, token: 'token' }] },
+            onButton: button => { if (button.className?.includes('integrate-button')) integrate = button; },
+        });
+        assert.equal(integrate?.disabled, disabled, label);
+    }
+});
+
+
+test('direct journey links initialize editing state after metadata arrives without resetting it on polling', () => {
+    const updates = [];
+    let previous;
+    const options = {
+        selected: 'deep-linked',
+        onState: (index, value) => updates.push(value),
+        onEffect: (effect, dependencies) => {
+            if (dependencies?.[0] !== 'deep-linked') return;
+            if (!previous || dependencies.some((value, index) => value !== previous[index])) effect();
+            previous = dependencies;
+        },
+    };
+    renderCodeWorkspace({ ...options, journeys: [] });
+    updates.length = 0;
+    const journey = { id: 'deep-linked', head: 'head', status: 'working', changesets: [{ id: 'initial-changeset' }], manifest: [{ target: 'api' }] };
+    renderCodeWorkspace({ ...options, journeys: [journey] });
+    assert.ok(updates.includes('initial-changeset'), 'the loaded changeset is available to Acquire lock');
+    assert.ok(updates.includes(journey.manifest), 'the existing declaration loads with the journey');
+    updates.length = 0;
+    renderCodeWorkspace({ ...options, journeys: [{ ...journey, changesets: [{ id: 'another-changeset' }] }] });
+    assert.equal(updates.length, 0, 'background refresh preserves a user-selected changeset');
 });
