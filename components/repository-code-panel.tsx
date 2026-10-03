@@ -1,6 +1,7 @@
 'use client';
 import { Code2, FileCode2, GitBranch, GitCommitHorizontal, LockKeyhole, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { SyntaxSource } from '@/components/syntax-code';
 import type { Files, Journey, Lease } from '@/lib/avc/core';
 import type { CodeMode, Resource } from '@/lib/repository-code';
 
@@ -45,7 +46,7 @@ export function RepositoryCodePanel(props: Props) {
         {status === 'loading' || status === 'idle' ? <div className="empty-panel compact" role="status"><RefreshCw size={28}/><h2>Loading repository code…</h2><p>Opening this revision’s files.</p></div> : error ? <div className="empty-panel compact" role="alert"><FileCode2 size={28}/><h2>Code could not be loaded</h2><p>{error}</p><Button variant="outline" onClick={props.onRetry}><RefreshCw />Try again</Button></div> : !paths.length ? <div className="empty-panel compact"><FileCode2 size={28}/><h2>No browsable text files</h2><p>This revision is empty or contains only binary, symlink, submodule, or large files. Import your repository from Connect & import, or inspect those files in your local Git checkout.</p></div> : <>
             <div className="editor-toolbar"><div className="file-picker" style={{ minWidth: 0, width: '100%' }}><FileCode2 size={17}/><select value={path} aria-label="File" onChange={event => props.onPathChange(event.target.value)} style={{ minWidth: 0 }}>{paths.map(file => <option key={file} value={file}>{file}</option>)}</select></div></div>
             <div className="editor-context">{editing ? reserved.length ? <><LockKeyhole size={14}/>{reserved.map(lease => lease.whole ? 'Whole file' : `Lines ${lease.start}–${lease.end}`).join(', ')} reserved</> : <><Code2 size={14}/>Journey revision · a valid lock is required to record changes</> : <><GitBranch size={14}/>Current repository code · read only{journey && ' · choose Journey revision to edit'}</>}</div>
-            <div className="editor-body"><div className="line-numbers" aria-hidden="true">{content.split('\n').map((_, index) => <div key={index}>{index + 1}</div>)}</div><textarea aria-label={`${editing && !closed ? 'Edit' : 'Read'} ${path}`} value={content} onChange={event => props.onContentChange(event.target.value)} spellCheck={false} readOnly={!editing || closed}/></div>
+            <SyntaxSource path={path} source={content} editable={editing && !closed} onChange={props.onContentChange}/>
         </>}
     </section>;
 }

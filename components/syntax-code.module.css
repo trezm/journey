@@ -1,0 +1,41 @@
+/* Token colors mirror familiar GitHub light syntax while retaining diff row backgrounds. */
+.syntax.syntax,
+span.syntax span {
+    display: inline;
+    font: inherit;
+    margin: 0;
+    color: inherit;
+}
+.syntax :global(.hljs-comment), .syntax :global(.hljs-quote) { color: #59636e; }
+.syntax :global(.hljs-keyword), .syntax :global(.hljs-selector-tag), .syntax :global(.hljs-deletion) { color: #cf222e; }
+.syntax :global(.hljs-string), .syntax :global(.hljs-regexp), .syntax :global(.hljs-doctag) { color: #0a3069; }
+.syntax :global(.hljs-number), .syntax :global(.hljs-literal), .syntax :global(.hljs-symbol), .syntax :global(.hljs-bullet), .syntax :global(.hljs-attr), .syntax :global(.hljs-attribute), .syntax :global(.hljs-variable), .syntax :global(.hljs-template-variable) { color: #0550ae; }
+.syntax :global(.hljs-title), .syntax :global(.hljs-section) { color: #8250df; }
+.syntax :global(.hljs-type), .syntax :global(.hljs-built_in) { color: #953800; }
+.syntax :global(.hljs-tag), .syntax :global(.hljs-name), .syntax :global(.hljs-selector-class), .syntax :global(.hljs-selector-id), .syntax :global(.hljs-addition) { color: #116329; }
+.syntax :global(.hljs-meta), .syntax :global(.hljs-link) { color: #0550ae; }
+.syntax :global(.hljs-emphasis) { font-style: italic; }
+.syntax :global(.hljs-strong), .syntax :global(.hljs-section) { font-weight: 600; }
+.source { background: #fff; color: #1f2328; }
+.language { padding: 6px 18px; border-top: 1px solid #dbe2ec; color: #59636e; font-size: 12px; text-transform: capitalize; }
+.viewport { display: flex; overflow: auto; max-height: 70vh; min-height: 420px; border-top: 1px solid #dbe2ec; }
+.numbers, .code, .input {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 13px;
+    font-weight: 400;
+    line-height: 22px;
+    letter-spacing: normal;
+    tab-size: 4;
+}
+.numbers { flex: none; padding: 16px 12px; background: #f6f8fa; color: #6e7781; text-align: right; user-select: none; border-right: 1px solid #dbe2ec; }
+.content { display: grid; flex: 1; min-width: 0; }
+.code, .input { grid-area: 1 / 1; margin: 0; padding: 16px; border: 0; border-radius: 0; white-space: pre; min-height: 420px; }
+.code { min-width: max-content; }
+.code code { font: inherit; }
+.line { display: block; height: 22px; }
+/* One outer scroller moves the highlight layer, caret, and line numbers together. */
+.input { width: 100%; height: 100%; min-width: 0; background: transparent; color: transparent; caret-color: #1f2328; resize: none; overflow: hidden; outline-offset: -2px; }
+.input::selection { color: transparent; background: #0969da35; }
+@media (forced-colors: active) {
+    .input { color: CanvasText; background: Canvas; }
+}
