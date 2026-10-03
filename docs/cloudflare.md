@@ -1,5 +1,9 @@
 # Deploy Journey to Cloudflare Workers
 
+The production workspace is now `https://journey.peter-s-mertz.workers.dev`, using the configured `journey` D1 database and private `journey-git` R2 bucket. Its original repository history and existing agent credentials were copied and checked against a complete private source backup. Owner sign-in uses Cloudflare Access and the explicit verified owner mapping described below.
+
+The former ChatGPT Site runs only the retirement handler in `build/sites-worker.ts`: browser navigation redirects to the Cloudflare origin, while old API, export and mutation requests return `410 site_moved`. It cannot read or write the preserved source storage. Keep the source database and bucket for rollback; do not redeploy the previous writable application without first pausing Cloudflare writes and reconciling all subsequent changes. Private connection profiles must use the Cloudflare origin and omit the obsolete `siteToken`; repository credentials remain unchanged.
+
 Journey runs its interface, authentication, API and authenticated Git endpoint in one Cloudflare Worker. D1 stores accounts, sessions, agent credentials and repository protocol state. R2 stores Git objects, cached trees and snapshots. `wrangler.jsonc` is the checked-in source for bindings; the Cloudflare Vite plugin generates `dist/server/wrangler.json` during each build. Never edit generated configuration. No ChatGPT Site, connector service, platform identity header or platform service token is needed.
 
 ## Local development and verification
