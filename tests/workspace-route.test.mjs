@@ -145,3 +145,20 @@ test('the rendered settings return control crosses the page boundary with a nati
         assert.match(renderToStaticMarkup(React.createElement(Settings)), /<a href="\/repositories\/exact"[^>]*>Back to workspace<\/a>/);
     }
 });
+
+test('settings hydration never exposes a Back link to the default repository', () => {
+    const React = createRequire(import.meta.url)('react');
+    const { renderToStaticMarkup } = createRequire(import.meta.url)('react-dom/server');
+    const Settings = moduleFrom('../app/settings/page.tsx', {
+        react: { ...React, useState: value => [value, () => {}], useEffect: () => {} },
+        'next/link': { __esModule: true, default: ({ children, ...props }) => React.createElement('a', props, children) },
+        'lucide-react': new Proxy({}, { get: () => () => null }),
+        '@/components/ui/button': { Button: () => null }, '@/components/ui/switch': { Switch: () => null },
+        '@/lib/avc/core': { repositoryPolicy: () => ({}) }, './settings.module.css': { default: {} },
+        '@/hooks/use-workspace-route': { useWorkspaceRoute: () => ({ project: '', hrefFor: () => '/' }) },
+    }).default;
+    const html = renderToStaticMarkup(React.createElement(Settings));
+    assert.match(html, /<span[^>]*aria-disabled="true"[^>]*>Back to workspace<\/span>/);
+    assert.doesNotMatch(html, /<a[^>]*>Back to workspace<\/a>/);
+    assert.match(html, /<a href="\/"[^>]*><span><\/span>Journey<\/a>/, 'the deliberate brand Home link stays available');
+});

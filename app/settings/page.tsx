@@ -57,7 +57,7 @@ export default function RepositorySettings() {
         finally { setSaving(false); }
     }
     return <main className={styles.page}>
-        <header className={styles.header}><Link href="/" className={styles.brand}><span><GitBranch size={22}/></span>Journey</Link><a href={hrefFor({ journey: '', tab: 'code', mode: 'repository', path: '' })} className={styles.back}><ArrowLeft size={16}/>Back to workspace</a></header>
+        <header className={styles.header}><Link href="/" className={styles.brand}><span><GitBranch size={22}/></span>Journey</Link>{project ? <a href={hrefFor({ journey: '', tab: 'code', mode: 'repository', path: '' })} className={styles.back}><ArrowLeft size={16}/>Back to workspace</a> : <span className={styles.back} aria-disabled="true"><ArrowLeft size={16}/>Back to workspace</span>}</header>
         <div className={styles.content}>
             <div className={styles.heading}><div className={styles.eyebrow}>{repository?.state.name ?? 'REPOSITORY'}</div><h1><Settings size={25}/>Repository settings</h1><p>Choose how your workers merge changes and how your coordinator reviews them.</p></div>
             {loading && <p role="status" className={styles.loading}>Loading settings…</p>}

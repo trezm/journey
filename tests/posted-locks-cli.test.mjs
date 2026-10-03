@@ -73,6 +73,7 @@ test('worker watcher renews only current draft locks while retaining inbox monit
     f.context.state.leases[0] = lease('draft', { retained: true, expires: 0 });
     f.context.cursor = 2; f.context.events.push({ id: 2, type: 'journey.integrated', journey: 'other-worker' });
     await until(async () => (await readFile(join(f.directory, '.journey/cursor'), 'utf8').catch(() => '')) === '2');
+    await until(async () => /2 locks \(2 retained\)/.test(await readFile(join(f.directory, '.journey/watcher.log'), 'utf8').catch(() => '')));
     watching.child.kill('SIGTERM'); await watching.completion;
     assert.equal(f.requests.filter(r => r.method === 'POST').length, 1);
     const events = (await readFile(join(f.directory, '.journey/inbox.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse);
