@@ -1,11 +1,11 @@
 import { bindings } from '@/lib/avc/storage';
-import { digest, passwordHash, token, principal, sameOrigin, rateLimit } from '@/lib/avc/auth';
+import { digest, passwordHash, token, principal, sameOrigin, rateLimit, authenticationMode } from '@/lib/avc/auth';
 import { insist, ProtocolError } from '@/lib/avc/core';
 export async function GET(req: Request) { try {
-    return Response.json({ user: await principal(req) });
+    return Response.json({ user: await principal(req), mode: authenticationMode() }, { headers: { 'Cache-Control': 'no-store' } });
 }
 catch {
-    return Response.json({ user: null });
+    return Response.json({ user: null, mode: authenticationMode() }, { headers: { 'Cache-Control': 'no-store' } });
 } }
 export async function POST(req: Request) {
     try {
@@ -15,6 +15,10 @@ export async function POST(req: Request) {
             email: string;
             password: string;
         };
+        if (authenticationMode() === 'access') {
+            insist(action === 'logout', 'access_authentication_required', 'Sign in through Cloudflare Access.', 403);
+            return Response.json({ ok: true, logoutUrl: '/cdn-cgi/access/logout' }, { headers: { 'Cache-Control': 'no-store' } });
+        }
         const db = bindings().db;
         if (action === 'logout') {
             const raw = req.headers.get('cookie')?.match(/avc_session=([^;]+)/)?.[1];

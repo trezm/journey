@@ -1,3 +1,5 @@
+import { env } from 'cloudflare:workers';
+import { accessEnabled, accessPrincipal, type AccessEnvironment } from './access.ts';
 import { bindings } from './storage.ts';
 import { insist } from './core.ts';
 export type Principal = {
@@ -10,16 +12,22 @@ export type Principal = {
 export async function digest(s: string) { return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)))).map(x => x.toString(16).padStart(2, '0')).join(''); }
 export function token() { return 'avc_' + Array.from(crypto.getRandomValues(new Uint8Array(32))).map(x => x.toString(16).padStart(2, '0')).join(''); }
 export async function passwordHash(password: string, salt?: string) { const seed = salt ?? token(); const material = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']); const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt: new TextEncoder().encode(seed), iterations: 100000, hash: 'SHA-256' }, material, 256); return seed + ':' + Array.from(new Uint8Array(bits)).map(x => x.toString(16).padStart(2, '0')).join(''); }
+export function authenticationMode(): 'password' | 'access' { return accessEnabled(env as typeof env & AccessEnvironment) ? 'access' : 'password'; }
 export async function principal(req: Request): Promise<Principal | null> {
     const { db } = bindings();
     const auth = req.headers.get('authorization');
-    let bearer = auth?.startsWith('Bearer ') ? auth.slice(7) : undefined;
-    if (auth?.startsWith('Basic ')) {
+    const repositoryAuth = /^(Bearer|Basic)(?:\s|$)/i.exec(auth ?? '');
+    let bearer: string | undefined;
+    if (repositoryAuth?.[1].toLowerCase() === 'bearer')
+        bearer = auth!.slice(repositoryAuth[1].length).trim();
+    if (repositoryAuth?.[1].toLowerCase() === 'basic') {
         try {
-            bearer = atob(auth.slice(6)).split(':').slice(1).join(':');
-        }
-        catch { }
+            const decoded = atob(auth!.slice(repositoryAuth[1].length).trim()), colon = decoded.indexOf(':');
+            if (colon >= 0) bearer = decoded.slice(colon + 1);
+        } catch { }
     }
+    // An explicit failed repository credential cannot become a human identity.
+    if (repositoryAuth && !bearer) return null;
     if (bearer) {
         const hash = await digest(bearer);
         const a = await db.prepare('SELECT project,name,role FROM agents WHERE digest=?').bind(hash).first<{
@@ -31,8 +39,10 @@ export async function principal(req: Request): Promise<Principal | null> {
             return { id: 'agent:' + hash.slice(0, 16), name: a.name, agent: true, project: a.project, role: a.role };
         return null;
     }
-    // Public Workers accept only application sessions and repository tokens.
-    // Forwarded identity headers are client-controlled and never authenticate.
+    if (authenticationMode() === 'access')
+        return accessPrincipal(req, env as typeof env & AccessEnvironment);
+    // Forwarded identity headers never authenticate. Outside Access deployments,
+    // human authentication remains the existing D1 application session.
     const cookie = req.headers.get('cookie')?.split(';').map(x => x.trim()).find(x => x.startsWith('avc_session='))?.slice(12);
     if (!cookie)
         return null;

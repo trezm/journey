@@ -15,7 +15,7 @@
     {
       "binding": "DB",
       "database_name": "journey",
-      "database_id": "00000000-0000-4000-8000-000000000000",
+      "database_id": "9bc4583f-c7b0-4a34-a1e6-e38063214c2c",
       "migrations_dir": "./drizzle"
     }
   ],
@@ -24,5 +24,10 @@
       "binding": "BUCKET",
       "bucket_name": "journey-git"
     }
-  ]
+  ],
+  "preview_urls": false,
+  "vars": {
+    "AVC_ACCESS_TEAM_DOMAIN": "mertz.cloudflareaccess.com",
+    "AVC_ACCESS_AUD": "875efad6b43955c6a936e44b379a3074a7bd71f7309e8539cda974f4d39d0681"
+  }
 }
