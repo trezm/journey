@@ -11,7 +11,7 @@ Working MVP of journey-based version control. A journey contains described chang
 - Immutable Git blobs, trees and commits stored in R2; authenticated dumb-HTTP Git cloning. Agents publish through the coordinated API, rather than raw Git push.
 - Append-only review, patch, lease and integration events; per-journey inboxes with replay cursors.
 - Required breaking-change declarations (explicit empty lists allowed), per-integration dispositions, stale-head rejection and repository-state compare-and-swap publication.
-- Optional approval policy. Builds and tests are deliberately outside the protocol.
+- Owner integration and the Integrate button require approval of the exact current revision. Worker approval remains configurable in repository settings. Builds and tests are deliberately outside the protocol.
 - Email/password accounts and hashed sessions for Cloudflare hosting. Public identity headers are never accepted as authentication.
 
 ## Import and connect Codex

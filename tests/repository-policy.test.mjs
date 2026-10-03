@@ -99,3 +99,23 @@ test('readiness responds to stale main, changes requested, old approvals, declar
     assert.equal(approvalInbox(s,coordinator,inbox.cursor).events.length,0);
     fails(()=>approvalInbox(s,coordinator,NaN),'invalid_cursor');
 });
+
+
+test('owner integration always requires current approval even when worker approval is optional', () => {
+    const {s,j} = fixture();
+    updatePolicy(s,{requireApproval:false},owner);
+    validateIntegrationAuthority(s,j,worker);
+    fails(() => validateIntegrationAuthority(s,j,owner),'approval_required');
+    j.reviews.push({kind:'approve',revision:'old',authority:'human'});
+    fails(() => validateIntegrationAuthority(s,j,owner),'approval_required');
+    j.reviews.push({kind:'approve',revision:j.head,authority:'human',resolved:true});
+    fails(() => validateIntegrationAuthority(s,j,owner),'approval_required');
+    j.reviews.push({kind:'approve',revision:j.head,authority:'coordinator'});
+    fails(() => validateIntegrationAuthority(s,j,owner),'approval_required');
+    updatePolicy(s,{allowCoordinatorApproval:true},owner);
+    validateIntegrationAuthority(s,j,owner);
+    updatePolicy(s,{allowCoordinatorApproval:false},owner);
+    fails(() => validateIntegrationAuthority(s,j,owner),'approval_required');
+    j.reviews.push({kind:'approve',revision:j.head,authority:'human'});
+    validateIntegrationAuthority(s,j,owner);
+});

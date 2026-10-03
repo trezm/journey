@@ -386,7 +386,7 @@ export function approvalAuthority(s: State, j: Journey, user: Reviewer, legacyRo
 export function hasApproval(s: State, j: Journey) { return j.reviews.some(r => r.kind === 'approve' && r.revision === j.head && !r.resolved && (r.authority !== 'coordinator' || repositoryPolicy(s).allowCoordinatorApproval)); }
 export function validateIntegrationAuthority(s: State, j: Journey, user: Reviewer) {
     insist(!user.agent || repositoryPolicy(s).allowWorkerMerge, 'worker_merge_disabled', 'The repository owner has disabled worker merging.', 403);
-    if (s.requireApproval) insist(hasApproval(s, j), 'approval_required', 'An authorized reviewer must approve this exact revision.');
+    if (!user.agent || s.requireApproval) insist(hasApproval(s, j), 'approval_required', 'An authorized reviewer must approve this exact revision.');
 }
 const approvalEventTypes = new Set(['review.requested', 'review.approved', 'review.changes_requested', 'review.commented', 'review.resolved', 'patch.recorded', 'manifest.updated', 'journey.reconciled', 'journey.integrated', 'journey.abandoned', 'policy.changed']);
 export function approvalInbox(s: State, user: Reviewer, since = 0, legacyRoles: Record<string, string> = {}) {
