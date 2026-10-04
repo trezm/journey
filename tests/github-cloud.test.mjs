@@ -106,6 +106,45 @@ class Bucket {
     async head(key) { return this.data.has(key) ? {} : null; }
     async put(key, value) { this.data.set(key, typeof value === 'string' ? Buffer.from(value) : Uint8Array.from(value)); }
 }
+test('workerd GitHub transport accepts successful fetches and rejects redirects without forwarding credentials', async () => {
+    const require = createRequire(import.meta.url);
+    const { Miniflare } = await import(pathToFileURL(require.resolve('miniflare', { paths: [require.resolve('wrangler')] })).href);
+    const { build } = await import(pathToFileURL(require.resolve('esbuild', { paths: [require.resolve('wrangler')] })).href);
+    const hash = 'a'.repeat(40), token = 'runtime-test-private-token';
+    let requests = 0, authenticated = 0, forwarded = 0;
+    const statuses = [301, 302, 303, 307, 308];
+    // Use a direct mock origin: Miniflare's fetchMock bridge delegates to Node
+    // fetch, which can follow a redirect before Workers receives its response.
+    const outboundService = async request => {
+        const url = new URL(request.url);
+        if (url.hostname === 'redirect.example') { forwarded++; return Response.json({}); }
+        assert.equal(url.hostname, 'api.github.com'); assert.equal(request.method, 'GET');
+        requests++; if (request.headers.get('Authorization') === `Bearer ${token}`) authenticated++;
+        if (url.pathname === '/repos/team/repo/git/ref/heads/main') return Response.json({ object: { type: 'commit', sha: hash } });
+        const status = Number(url.pathname.match(/\/redirect-(\d+)$/)?.[1]);
+        assert(statuses.includes(status));
+        return new Response(null, { status, headers: { Location: 'https://redirect.example/credential-trap' } });
+    };
+    const bundle = await build({ stdin: {
+        contents: `import { GitHubTransport } from './lib/avc/github-transport.ts';
+        export default { async fetch(request) { const transport=new GitHubTransport({owner:'team',repo:'repo'},'${token}'); try { return Response.json({head:await transport.head(new URL(request.url).pathname.slice(1))}); } catch(error) { return Response.json({code:error.code,message:error.message},{status:502}); } } };`,
+        resolveDir: process.cwd(), loader: 'ts',
+    }, bundle: true, write: false, format: 'esm', platform: 'browser', external: ['node:zlib'] });
+    const runtime = new Miniflare({ modules: true, compatibilityDate: '2026-05-15', compatibilityFlags: ['nodejs_compat'], script: bundle.outputFiles[0].text, outboundService });
+    try {
+        const success = await runtime.dispatchFetch('https://worker.test/main');
+        const successBody = await success.json();
+        assert.equal(success.status, 200, JSON.stringify(successBody)); assert.deepEqual(successBody, { head: hash });
+        for (const status of statuses) {
+            const response = await runtime.dispatchFetch(`https://worker.test/redirect-${status}`);
+            assert.equal(response.status, 502); const failure = await response.json();
+            assert.equal(failure.code, 'github_request', JSON.stringify({ failure, requests, authenticated, forwarded }));
+            assert.match(failure.message, new RegExp(`\\(${status}\\)`)); assert(!JSON.stringify(failure).includes(token));
+        }
+        assert.equal(requests, 6); assert.equal(authenticated, 6); assert.equal(forwarded, 0);
+    } finally { await runtime.dispose(); }
+});
+
 test('hosted fast-forward import completes without a file/tree snapshot or token disclosure', async t => {
     const bucket = new Bucket(), remoteBucket = new Bucket(), git = new GitStore(bucket, 'repo'), remoteGit = new GitStore(remoteBucket, 'remote');
     const initial = await git.save({ file: 'initial' }, undefined, 'initial', 'Owner');

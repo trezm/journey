@@ -74,7 +74,7 @@ export async function readCommitPack(response: Uint8Array, expected: string): Pr
 }
 export class GitHubTransport {
     private api: string; private git: string; private token: string; private send: typeof fetch; private execution?: AbortSignal;
-    constructor(target: GitHubTarget, token: string, send: typeof fetch = fetch, execution?: AbortSignal) {
+    constructor(target: GitHubTarget, token: string, send: typeof fetch = fetch.bind(globalThis), execution?: AbortSignal) {
         this.token = token; this.send = send; this.execution = execution;
         this.api = `https://api.github.com/repos/${target.owner}/${target.repo}`;
         this.git = `https://github.com/${target.owner}/${target.repo}.git`;
@@ -82,7 +82,7 @@ export class GitHubTransport {
     private async request(url: string, init: RequestInit = {}, protocol = false) {
         this.execution?.throwIfAborted();
         const timeout = AbortSignal.timeout(20_000);
-        const response = await this.send(url, { ...init, redirect: 'error', signal: this.execution ? AbortSignal.any([this.execution, timeout]) : timeout, headers: {
+        const response = await this.send(url, { ...init, redirect: 'manual', signal: this.execution ? AbortSignal.any([this.execution, timeout]) : timeout, headers: {
             ...(this.token ? { Authorization: protocol ? `Basic ${btoa(`x-access-token:${this.token}`)}` : `Bearer ${this.token}` } : {}),
             'User-Agent': 'Journey-cloud-sync', Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2026-03-10', ...init.headers,
         } });
