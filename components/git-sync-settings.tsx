@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { AlertTriangle, CheckCircle2, Download, GitBranch, RefreshCw } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, GitBranch, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { GitSyncWarning } from '@/components/git-sync-warning';
@@ -25,6 +25,7 @@ export function GitSyncSettings({ project }: { project: string }) {
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
     const [notice, setNotice] = useState('');
+    const [token, setToken] = useState('');
     const [now, setNow] = useState(() => Date.now());
     const initialized = useRef(false);
     useEffect(() => {
@@ -53,31 +54,29 @@ export function GitSyncSettings({ project }: { project: string }) {
     const sync = snapshot?.sync;
     const editable = !!snapshot && !snapshot.user.agent;
     const saved = configuration(sync);
-    const changed = !!draft && (draft.remote !== saved.remote || draft.branch !== saved.branch || draft.enabled !== saved.enabled);
+    const changed = !!draft && (draft.remote !== saved.remote || draft.branch !== saved.branch || draft.enabled !== saved.enabled || !!token);
     const locked = !!sync?.run;
     const lastActivity = sync ? Math.max(sync.lastCheckedAt ?? 0, sync.updatedAt) : 0;
-    const stale = !!lastActivity && now - lastActivity > 120000;
-    const status = !sync?.enabled ? 'Disabled' : sync.status === 'conflict' ? 'Conflict — paused' : sync.status === 'error' ? 'Needs attention' : sync.run?.phase === 'resolving' ? 'Applying resolution' : sync.status === 'running' ? 'Synchronizing' : !sync.lastSyncedHead ? 'Waiting for runner' : sync.lastSyncedHead === snapshot?.head ? 'Up to date at last sync' : 'Waiting to publish';
+    const stale = !!lastActivity && now - lastActivity > 900000;
+    const status = !sync?.enabled ? 'Disabled' : sync.status === 'conflict' ? 'Conflict — paused' : sync.status === 'error' ? 'Needs attention' : sync.run?.phase === 'resolving' ? 'Applying resolution' : sync.status === 'running' ? 'Synchronizing' : !sync.lastSyncedHead ? sync.hosted ? 'Waiting for hosted sync' : 'Waiting for existing bridge' : sync.lastSyncedHead === snapshot?.head ? 'Up to date at last sync' : 'Waiting to publish';
     function change(update: Partial<Configuration>) { setDraft(value => value ? { ...value, ...update } : value); setNotice(''); }
     async function save(event: React.FormEvent) {
         event.preventDefault();
         if (!draft || !editable || locked || busy) return;
         setBusy(true); setError(''); setNotice('');
         try {
-            await request('/api/sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project, action: 'configure', ...draft, remote: draft.remote.trim(), branch: draft.branch.trim() }) });
+            await request('/api/sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project, action: 'configure', hosted: !!token || !sync || !!sync.hosted || draft.remote.trim() !== saved.remote, ...draft, token: token || undefined, remote: draft.remote.trim(), branch: draft.branch.trim() }) });
             const data = await refresh(); setDraft(configuration(data.sync));
-            setNotice('Git sync settings saved. Keep the runner active to synchronize this repository.');
+            setToken(''); setNotice(data.sync?.hosted ? 'Hosted GitHub sync settings saved. Cloudflare checks this repository automatically.' : 'Existing Git bridge settings saved. Enter a GitHub token to migrate to hosted sync.');
         } catch (e) { setError((e as Error).message); }
         finally { setBusy(false); }
     }
-    async function downloadConnection() {
-        setBusy(true); setError(''); setNotice('');
+    async function recover(action: 'reconnect' | 'cancel') {
+        setBusy(true); setError('');
         try {
-            const response = await fetch('/api/connect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project }) });
-            if (!response.ok) { const data = await response.json() as { error?: string }; throw new Error(data.error ?? 'Connection download failed.'); }
-            const blob = await response.blob(), url = URL.createObjectURL(blob), link = document.createElement('a');
-            link.href = url; link.download = 'journey-connection.json'; link.click(); URL.revokeObjectURL(url);
-            setNotice('Connection downloaded. Keep it private and out of Git; it grants access to this repository.');
+            await request('/api/sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project, action, ...(action === 'reconnect' ? { token } : {}) }) });
+            setToken(''); const data = await refresh(); setDraft(configuration(data.sync));
+            setNotice(action === 'reconnect' ? 'GitHub credentials reconnected. Preserved sync work resumes automatically.' : 'Hosted sync disabled. Preserved history remains available; repository writes can resume.');
         } catch (e) { setError((e as Error).message); }
         finally { setBusy(false); }
     }
@@ -86,15 +85,18 @@ export function GitSyncSettings({ project }: { project: string }) {
             <header className={styles.heading}><GitBranch size={21}/><div><h2 id="git-sync-heading">Git publishing & sync</h2><p>Connect one Git branch to publish integrated work and bring remote changes into Journey.</p></div></header>
             {loading ? <p className={styles.loading} role="status">Loading Git sync…</p> : <>
                 {snapshot && draft && <>
-                    <div className={styles.status}><div><span className={styles.statusLabel}>SYNC STATUS</span><strong>{status}</strong></div><div className={styles.lastSync}>{lastActivity ? <>{sync?.lastCheckedAt === lastActivity ? 'Last checked' : 'Last activity'} <time dateTime={new Date(lastActivity).toISOString()}>{new Date(lastActivity).toLocaleString()}</time></> : 'No runner activity recorded'}{sync?.enabled && stale && <span>No recent activity. Check that the runner is still active.</span>}</div></div>
+                    <div className={styles.status}><div><span className={styles.statusLabel}>SYNC STATUS</span><strong>{status}</strong></div><div className={styles.lastSync}>{lastActivity ? <>{sync?.lastCheckedAt === lastActivity ? 'Last checked' : 'Last activity'} <time dateTime={new Date(lastActivity).toISOString()}>{new Date(lastActivity).toLocaleString()}</time></> : 'No hosted sync activity recorded'}{sync?.enabled && stale && <span>No recent activity. Check Cloudflare scheduling and GitHub token permissions.</span>}</div></div>
                     <form onSubmit={save}>
                         {!editable && <p className={styles.ownerOnly}>Only the repository owner can configure Git sync.</p>}
+                        {sync && !sync.hosted && <p className={styles.ownerOnly}>This repository uses an existing Git bridge. Enter a GitHub repository token to migrate to hosted synchronization.</p>}
                         {locked && <p className={styles.ownerOnly}>Configuration is locked while this sync is active. Finish recovery before changing the remote or disabling sync.</p>}
                         <div className={styles.fields}>
-                            <label htmlFor="sync-remote">Git remote URL<input id="sync-remote" type="text" value={draft.remote} onChange={event => change({ remote: event.target.value })} placeholder="https://git.example.com/team/repository.git" disabled={!editable || busy || locked} required autoComplete="off" spellCheck={false} aria-describedby="sync-remote-help"/><span id="sync-remote-help">Use an HTTPS or SSH Git URL without passwords or tokens. The runner uses your local Git credentials.</span></label>
+                            <label htmlFor="sync-remote">Git remote URL<input id="sync-remote" type="text" value={draft.remote} onChange={event => change({ remote: event.target.value })} placeholder="https://github.com/team/repository.git" disabled={!editable || busy || locked} required autoComplete="off" spellCheck={false} aria-describedby="sync-remote-help"/><span id="sync-remote-help">Use a github.com HTTPS repository URL. Authentication is stored encrypted in Cloudflare.</span></label>
                             <label htmlFor="sync-branch">Remote branch<input id="sync-branch" type="text" value={draft.branch} onChange={event => change({ branch: event.target.value })} placeholder="main" disabled={!editable || busy || locked} required autoComplete="off" spellCheck={false} aria-describedby="sync-branch-help"/><span id="sync-branch-help">Journey’s main syncs with this branch. Your deployment service can watch it for changes.</span></label>
-                            <div className={styles.toggle}><div><label htmlFor="sync-enabled">Enable two-way sync</label><p id="sync-enabled-help">Publish after integration and fetch remote updates while the runner is active. Divergent commits are rebased and pushed with a lease; conflicts pause repository writes.</p></div><Switch id="sync-enabled" checked={draft.enabled} onCheckedChange={value => change({ enabled: value })} disabled={!editable || busy || locked} aria-describedby="sync-enabled-help"/></div>
+                            <label htmlFor="sync-token">GitHub access token<input id="sync-token" type="password" value={token} onChange={event => setToken(event.target.value)} placeholder="Leave blank to retain an existing token" disabled={!editable || busy} autoComplete="new-password"/><span>Use a fine-grained token restricted to this repository with Contents read and write permissions. Add Workflows write permission when changing workflow files. The token is never returned to your browser.</span></label>
+                            <div className={styles.toggle}><div><label htmlFor="sync-enabled">Enable two-way sync</label><p id="sync-enabled-help">Cloudflare polls every five minutes and incrementally transfers missing Git objects. Divergent heads pause for an explicit merge; repository writes remain paused until recovery.</p></div><Switch id="sync-enabled" checked={draft.enabled} onCheckedChange={value => change({ enabled: value })} disabled={!editable || busy || locked} aria-describedby="sync-enabled-help"/></div>
                         </div>
+                        {sync?.hosted && editable && <div className={styles.downloads}><Button type="button" variant="outline" disabled={busy || !token} onClick={() => { void recover('reconnect'); }}>Reconnect GitHub token</Button>{locked && <Button type="button" variant="outline" disabled={busy} onClick={() => { void recover('cancel'); }}>Disable sync & release pause</Button>}</div>}
                         <footer className={styles.footer}><p>{changed ? 'You have unsaved changes.' : sync ? 'Settings are up to date.' : 'Add a remote to get started.'}</p><div><Button type="button" variant="outline" disabled={!changed || busy || locked} onClick={() => { setDraft(saved); setNotice(''); }}>Discard changes</Button><Button type="submit" disabled={!editable || !changed || busy || locked || !draft.remote.trim() || !draft.branch.trim()}>{busy ? 'Saving…' : 'Save Git sync'}</Button></div></footer>
                     </form>
                 </>}
@@ -103,12 +105,6 @@ export function GitSyncSettings({ project }: { project: string }) {
         {error && <div className={styles.error} role="alert"><AlertTriangle size={17}/><span>{error}</span><Button type="button" variant="ghost" size="sm" onClick={() => { setError(''); void refresh().catch(e => setError((e as Error).message)); }}><RefreshCw size={14}/>Retry</Button></div>}
         {notice && <div className={styles.notice} role="status"><CheckCircle2 size={17}/>{notice}</div>}
         {snapshot && <GitSyncWarning key={sync?.run?.id ?? 'idle'} project={project} sync={sync} editable={editable} onRefresh={refresh}/>}
-        <div className={styles.runner}>
-            <h3>Run the Git bridge</h3><p>Sync requires a process running on your computer or server with Node.js 22+ and native Git. Leave it running for automatic publishing and incoming updates. Git authentication stays on that machine.</p>
-            <div className={styles.downloads}><Button asChild variant="outline"><a href="/git-sync.mjs" download="git-sync.mjs"><Download size={16}/>Download Git runner</a></Button><Button variant="outline" disabled={!editable || busy || locked} onClick={downloadConnection}><Download size={16}/>Download connection</Button></div>
-            <pre><code>node git-sync.mjs --connection journey-connection.json --watch</code></pre>
-            <p className={styles.small}>Run in a trusted directory with access to your Git credential helper or SSH key. Keep the connection file private and out of Git. Use <code>--once</code> instead of <code>--watch</code> for a single sync.</p>
-            {locked && <p className={styles.small}>Restart an interrupted sync with the same connection file that started it. A new connection cannot take over an active run.</p>}
-        </div>
+        <div className={styles.runner}><h3>Hosted in Cloudflare</h3><p>Automatic two-way sync runs in Cloudflare. No downloaded runner or local process is required. Git objects transfer individually through the existing R2 object store; no repository is cloned or checked out.</p><p className={styles.small}>Large initial history transfers resume through bounded queue continuations. Each object must fit the 8 MB transfer limit. Divergent history is preserved on a conflict branch and requires an owner-selected resolution.</p></div>
     </section>;
 }

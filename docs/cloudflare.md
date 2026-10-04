@@ -49,20 +49,29 @@ If moving an existing Site with repositories, follow the migration section first
    pnpm cf whoami
    ```
 
-   CI can instead use `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` as protected environment variables. Grant Workers deployment plus D1/R2 permissions needed for the operations below. Never place the token in source, config or command arguments. Bindings do not require an application API token.
+   CI can instead use `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` as protected environment variables. Grant Workers deployment plus D1/R2/Queues permissions needed for the operations below. Never place the token in source, config or command arguments. Bindings do not require an application API token.
 
-2. Provision D1 and R2, then save their actual names and the D1 UUID:
+2. Provision D1, R2 and the GitHub sync Queue, then save their actual names and the D1 UUID:
 
    ```sh
    pnpm cf d1 create journey
    pnpm cf r2 bucket create journey-git
+   pnpm cf queues create journey-github-sync
    pnpm cf:configure --database-id YOUR_D1_UUID --database-name journey --bucket journey-git --name journey
    pnpm cf:check
    ```
 
    Replace `YOUR_D1_UUID` with the returned database ID. You can bind existing resources instead. `cf:configure` only updates local configuration; it does not create or deploy anything. Commit the non-secret resource configuration so subsequent builds use the same storage. Choose unique resource/Worker names if these names are already in use.
 
-3. Apply migrations, verify and publish:
+3. Set `GITHUB_SYNC_KEY` as a private Worker secret containing 32 random bytes encoded as 64 hexadecimal characters. Submit it through Wrangler's secret prompt; never put it in source, command arguments or logs:
+
+   ```sh
+   pnpm cf secret put GITHUB_SYNC_KEY
+   ```
+
+   Preserve this key across deployments: changing it makes existing encrypted GitHub tokens unreadable until owners reconnect them. The checked-in configuration requires the secret and binds `GITHUB_SYNC_QUEUE` as producer and consumer, with a five-minute Cron Trigger. Use separate queues and secrets for staging. See [hosted GitHub sync setup and recovery](git-sync.md).
+
+   Apply migrations, verify and publish:
 
    ```sh
    pnpm db:migrate:remote
@@ -71,7 +80,7 @@ If moving an existing Site with repositories, follow the migration section first
    pnpm deploy
    ```
 
-   The deploy command rebuilds before publishing the generated Worker and its client assets. Wrangler reports the `workers.dev` URL. Open it and create an account. The app does not require application secrets for email/password sessions or repository-scoped agent authentication.
+   The deploy command rebuilds before publishing the generated Worker and its client assets. Wrangler reports the `workers.dev` URL. Open it and create an account. Email/password sessions and repository-scoped agent authentication do not use this encryption secret. Hosted GitHub sync requires it. Verify the generated deployment configuration retains the Queue bindings and Cron Trigger, and that the built Worker exports both scheduled and queue handlers.
 
 4. To use a custom domain, add a `routes` entry to `wrangler.jsonc` and rebuild/redeploy:
 

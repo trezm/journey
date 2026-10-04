@@ -41,7 +41,7 @@ export function GitSyncWarning({ project, sync, editable, onRefresh }: Props) {
             const response = await fetch('/api/sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project, action: 'resolve', runId: run.id, head: head.trim().toLowerCase() }) });
             const data = await response.json() as { error?: string };
             if (!response.ok) throw new Error(data.error ?? 'Could not resume Git sync.');
-            setNotice('Resolution requested. Keep the runner active so it can verify and import this exact remote commit.');
+            setNotice(sync.hosted ? 'Resolution requested. Cloudflare will verify and import this exact remote commit.' : 'Resolution requested. Keep the configured runner active to verify and import this exact commit.');
             try { await onRefresh(); } catch { setError('Resolution was requested, but the status could not refresh. Refresh this page to check progress.'); }
         } catch (e) { setError((e as Error).message); }
         finally { setBusy(false); }
@@ -50,11 +50,11 @@ export function GitSyncWarning({ project, sync, editable, onRefresh }: Props) {
         <div className={styles.heading} role={conflict || sync.status === 'error' ? 'alert' : 'status'}>
             {conflict || sync.status === 'error' ? <AlertTriangle size={21}/> : <RefreshCw size={20}/>}
             <div><h2>{resolving ? 'Applying your Git resolution' : conflict ? 'Git conflict: repository paused' : run ? 'Repository paused for Git sync' : 'Git sync needs attention'}</h2>
-                <p>{run ? 'Writes to this repository are paused. You can still inspect and export its history.' : 'The runner could not complete synchronization. Check its output and restart it to retry.'}</p>
+                <p>{run ? 'Writes to this repository are paused. You can still inspect and export its history.' : 'Synchronization could not finish. Check the configured sync service and credentials; both heads are preserved.'}</p>
             </div>
         </div>
         {sync.error && <p className={styles.error}>{sync.error}</p>}
-        {run && !conflict && !resolving && <p className={styles.detail}>Keep the Git runner active to finish {run.phase === 'publishing' ? 'publishing the synchronized commits' : 'checking and preparing the remote changes'}. Restart an interrupted run with its original connection file. Sync resumes after this operation completes.</p>}
+        {run && !conflict && !resolving && <p className={styles.detail}>Automatic synchronization will finish {run.phase === 'publishing' ? 'publishing the synchronized commits' : 'checking and preparing the remote changes'}. {sync.hosted ? 'Interrupted work resumes automatically.' : 'Restart an interrupted run with its original connection file.'} Sync resumes after this operation completes.</p>}
         {run && (conflict || resolving) && <>
             <dl className={styles.references}>
                 <Reference label="Preserved Journey head" value={run.journeyHead} href={`/api/avc?project=${encodeURIComponent(project)}&revision=${encodeURIComponent(run.journeyHead)}`}/>
@@ -65,7 +65,7 @@ export function GitSyncWarning({ project, sync, editable, onRefresh }: Props) {
             </dl>
             <div className={styles.publication}>
                 {run.conflictPublished ? <CheckCircle2 size={17}/> : <AlertTriangle size={17}/>}
-                <p><strong>{run.conflictPublished ? 'Conflict branch published.' : 'Conflict branch publication is not confirmed.'}</strong> {run.conflictPublished ? 'The remote branch preserves the original Journey head for manual recovery.' : 'Keep or restart the runner with its original connection file to retry publication. The Journey head remains available above.'}</p>
+                <p><strong>{run.conflictPublished ? 'Conflict branch published.' : 'Conflict branch publication is not confirmed.'}</strong> {run.conflictPublished ? 'The remote branch preserves the original Journey head for manual recovery.' : 'Retry the configured sync service to publish this branch. The Journey head remains available above.'}</p>
             </div>
             {run.conflictPublishError && <p className={styles.error}>Branch publication failed: {run.conflictPublishError}</p>}
             {!!run.conflicts?.length && <div className={styles.files}><h3>Conflicting files</h3><ul>{run.conflicts.map(path => <li key={path}><code>{path}</code></li>)}</ul></div>}
@@ -81,7 +81,7 @@ export function GitSyncWarning({ project, sync, editable, onRefresh }: Props) {
                     <Button type="submit" disabled={busy || !/^[a-f0-9]{40}$/i.test(head.trim())}><RefreshCw size={16}/>{busy ? 'Requesting resume…' : resolving ? 'Update resolution & resume' : 'Resume sync'}</Button>
                 </form> : <p className={styles.detail}>The repository owner must confirm the resolved commit and resume sync.</p>}
             </>
-            {resolving && <p className={styles.detail}>The runner must confirm the requested commit is still the remote branch head before applying it. If the remote moved, enter its new resolved SHA above. Keep the runner active with its original connection file; repository writes remain paused until it finishes.</p>}
+            {resolving && <p className={styles.detail}>Synchronization confirms the requested commit is still the remote branch head before applying it. If the remote moved, enter its new resolved SHA above. Repository writes remain paused until synchronization finishes.</p>}
         </>}
         {error && <p className={styles.error} role="alert">{error}</p>}
         {notice && <p className={styles.detail} role="status">{notice}</p>}

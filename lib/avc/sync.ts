@@ -19,6 +19,8 @@ export type SyncRun = {
     resolutionHead?: string;
 };
 export type SyncState = {
+    hosted?: true;
+    cloud?: { credential: string; generation: string; lease?: { token: string; until: number }; work?: import('./github-cloud.ts').CloudWork; nextAttemptAt?: number; failures?: number };
     remote: string;
     branch: string;
     enabled: boolean;
@@ -42,7 +44,7 @@ export function syncOwner(user: Reviewer) { insist(!user.agent, 'forbidden', 'On
 export function assertSyncWritable(s: State, action?: string) {
     insist(!s.sync?.run || (action === 'refresh' && s.sync.status === 'running' && s.sync.run.phase !== 'conflict'), 'sync_paused', 'Repository writes are paused while Git sync completes or awaits recovery.', 409, { runId: s.sync?.run?.id, status: s.sync?.status });
 }
-function branchName(value: unknown) {
+export function branchName(value: unknown) {
     insist(typeof value === 'string' && value.length > 0 && value.length <= 200 && !value.startsWith('-') && !value.startsWith('refs/') && !/[\x00-\x20\x7f~^:?*\[\\]/.test(value) && !value.includes('..') && !value.includes('@{') && !value.includes('//') && value.split('/').every(part => part && !part.startsWith('.') && !part.endsWith('.') && !part.endsWith('.lock')) && value !== '@', 'invalid_branch', 'Supply a valid branch name without refs/heads/.', 400);
     return value;
 }

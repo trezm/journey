@@ -1,53 +1,37 @@
-# Git publishing and synchronization
+# Hosted GitHub synchronization
 
-Journey can synchronize accepted `main` history with one branch on a generic Git remote. The remote may be GitHub, GitLab, Cloudflare Artifacts, or another HTTPS/SSH Git server. Deployment services watch that remote using their own configuration. Journey does not need their APIs, build credentials, or deployment settings.
+Configure an HTTPS `https://github.com/owner/repository.git` URL and branch in repository Settings. Supply a fine-grained GitHub token restricted to that repository with Contents read/write permission (and Workflows write permission when changing workflow files). Enable hosted sync. No downloaded runner or process in the user's checkout is required.
 
-## Connect a repository
+The deployment must provision `GITHUB_SYNC_KEY` as a Worker secret containing 64 hexadecimal characters (32 random bytes). Generate it securely and enter it through `wrangler secret put GITHUB_SYNC_KEY`; never commit or print it. Keep the key stable: rotating it requires reconnecting repository tokens. Tokens are AES-GCM encrypted with project, exact remote and credential ID as authenticated context, stored separately under private R2 credential keys. Public sync responses and events contain no token or ciphertext. The R2 bucket must remain private. No GitHub token is a shared deployment-wide credential.
 
-1. Open the repository's **Settings** and configure the credential-free remote URL, target branch, and enabled switch. Use a repository with shared history, an empty remote, or import the existing project into Journey first. Configuration and conflict resolution require the human owner.
-2. Download `git-sync.mjs` and a coordinator connection from the settings page. Keep the connection file private; it contains a repository credential.
-3. On a trusted machine with Node.js 22.13+ and Git, configure access to the Git remote. Keep Git credentials on this machine. Do not put a password or token in the remote URL saved in Journey.
-4. Start the runner:
+The Worker exports a five-minute cron handler which discovers up to 10,000 repositories per invocation and enqueues one independently fenced job per repository. Queue consumers process at most 20 object operations with concurrency capped at four. Incomplete successful transfers enqueue their next bounded continuation; API errors use persisted backoff and resume through later polls. This keeps a large repository from consuming another repository’s execution budget. Discovery beyond 10,000 repositories retains a fair cursor. Progress and errors are visible in Settings.
 
-   ```sh
-   node git-sync.mjs --connection journey-connection.json --watch
-   ```
+Provision the `journey-github-sync` Cloudflare Queue (`wrangler queues create journey-github-sync`) and configure the encryption secret before deploying. Verify the cron, queue consumer and existing D1/R2 bindings in the generated deployment configuration. Queue messages contain only project IDs, never credentials. Duplicate cron/queue delivery is fenced through D1.
 
-   For a single synchronization attempt, use `--once` instead. From this source checkout, the equivalent entry point is `node cli/sync-git.mjs`.
+## Pass-through object transport
 
-Keep the runner alive under your usual process supervisor for continuous publishing and incoming sync. It uses a temporary, isolated Git checkout, not your working repository. The application stores durable sync state in its existing repository metadata and Git objects in R2. No database migration or additional Cloudflare binding is required. The request Worker itself does not execute native Git.
+The runtime never invokes Git, clones, checks out, downloads an archive, or materializes repository file snapshots. It reuses existing R2 compressed loose objects. GitHub's smart upload-pack is requested with shallow depth one and `tree:0` to obtain exactly one raw commit. This preserves signed commits, encoding headers, author timezone bytes, arbitrary commit headers and the original SHA-1. Trees are fetched nonrecursively and reconstructed with SHA verification; blobs are fetched as individual raw objects. Every response, inflated object, checksum and content hash is bounded and checked. Unsupported filter/delta/multi-object responses stop safely.
 
-For HTTPS remotes, the runner uses your Git credential helper. A supervised runner can instead receive `GIT_SYNC_REMOTE_TOKEN`, `GIT_SYNC_REMOTE_URL`, and, if needed, `GIT_SYNC_REMOTE_USERNAME` through its environment. The URL must exactly match the configured Git remote before the token is sent; changing the remote does not silently forward the same credential elsewhere. SSH remotes use the machine's SSH authentication.
+For an empty GitHub repository, a deterministic empty-tree bootstrap commit is first published only to the unique run transfer ref using a tiny two-object pack. This initializes the Git database without touching the configured target branch; lost acknowledgements and ref collisions are checked before continuing.
 
-Restart a failed runner with the **same coordinator connection** so it can recover the existing operation. A new connection is a different coordinator and cannot take over another coordinator's active run. Authentication or connectivity failures remain visible; they do not silently release a possibly partially published operation.
+Outgoing blobs/trees use GitHub's Git database APIs with exact returned SHA verification. Raw commits use one-object receive-pack requests through a per-run transfer branch after dependencies exist. GitHub publication uses an atomic exact-old-OID receive-pack comparison. No force REST update or repository-sized pack is used. Transfer and conflict branches preserve data and are retained for inspection/recovery; administrators may remove completed transfer branches after confirming their revisions are reachable elsewhere.
 
-For an Access-protected Journey host, the runner needs access to the exact `/api/sync` endpoint and the existing authenticated `/api/git/*` endpoint. Configure a narrowly scoped Access bypass for `/api/sync` if using the application's coordinator authentication. The endpoint still enforces its own repository and role checks. The settings UI and `/api/connect` remain protected by Access. See [Cloudflare hosting](cloudflare.md).
+Each object/protocol response must fit within 8 MB. Closures and pending traversal are limited to 50,000 objects. Existing large objects that would need transfer cause a visible capacity error and leave heads unchanged. API rate limits, revoked/expired tokens, protected branches and unsupported server behavior remain visible retryable errors. Backoff grows from five minutes to one hour.
 
-## Synchronization policy
+## Heads, conflicts and recovery
 
-The runner fetches the configured remote branch and compares it with Journey's current `main`. Equal heads require no publication and update the last-checked status at most once per minute. If Journey is ahead, it publishes accepted commits. If the remote is ahead, Journey adopts those exact commits. When both have new commits, native Git rebases Journey's unpublished commits onto the captured remote head. Unrelated histories pause for manual resolution.
+Equal heads only record observation. A GitHub fast-forward is imported after complete object traversal and ancestry verification. Journey fast-forwards publish missing objects, durably stage the candidate, atomically update GitHub, then record completion. Progress survives interruption. A lost push acknowledgement observes the published candidate and completes without replaying the push. A concurrently moved branch restarts assessment without rewinding GitHub. Owner-selected resolutions remain paused if their exact remote head moved.
 
-Before rebasing, the server invalidates leases that overlap incoming changes. A sync operation holds a repository write barrier so the selected head cannot change underneath it. After a successful sync, workers read the notification, reconcile their isolated journeys, and reacquire invalidated scopes on the new revision. External Git updates are explicitly recorded as external updates; they do not imply Journey review or an empty breaking-change declaration. See [Lock lifecycle](lock-lifecycle.md).
+Divergence is conservatively paused rather than automatically rebased. Original Journey history is preserved in R2 and on the displayed GitHub conflict branch. Merge it with GitHub, push the resolved branch, then enter its exact SHA in Settings. Cloudflare imports and verifies that exact resolution. Active Journey leases are conservatively invalidated when incoming main changes; reconcile and reacquire before editing. Approvals of active journeys become stale.
 
-The runner stages its candidate in Journey before publishing. Pushes specify the exact expected remote branch SHA using `--force-with-lease`. A moved remote head requires another fetch and assessment. If a push succeeds but its acknowledgment is lost, the runner can recognize the already-published candidate and finish the same operation. Network errors retain the operation and its original heads for recovery.
+Owners can reconnect tokens during a paused run without discarding captured heads or work. An explicit Disable sync action preserves refs and releases the repository pause after any active bounded execution has finished.
 
-Rebasing changes commit IDs. Journey keeps the original objects, recorded patches, reviews and events, records replacement mappings, and advertises backup Git refs under `refs/heads/journey-sync/`. Historical approvals are not rewritten to approve replacement commits. The synchronized canonical head is recorded separately.
+D1 optimistic updates fence each progress/head write with a unique, expiring execution claim and configuration generation. GitHub writes occur outside retrying D1 callbacks and use exact ref comparisons. An expired execution cannot complete another claim or clear its lease. Content-addressed orphan objects from interrupted transfers are harmless.
 
-## Resolve a conflict
+## Compatibility
 
-A Git rebase conflict pauses writes and automatic synchronization for the affected repository. Reading, cloning, history inspection and recovery remain available. Other repositories continue independently.
+The legacy local runner protocol remains available for already configured native-Git repositories, but Settings now configures hosted GitHub mode. Hosted repositories reject local runner mutation actions. New hosted configuration supports github.com HTTPS only. Existing non-GitHub/SSH configurations require their legacy runner or migration to a GitHub repository. No existing Git objects or histories are rewritten or deleted.
 
-The runner publishes the **original Journey head**, before any rebase steps, to a unique branch named `journey-conflicts/<sync-id>`. The warning shows the preserved Journey SHA, captured remote SHA, conflict branch and conflicting paths. Branch publication is reported separately: if permissions or connectivity prevent publishing it, the repository stays paused and the runner retries publication. The warning does not claim the branch exists until publication succeeds.
+## Deployment validation
 
-1. Fetch the remote's target branch and the conflict branch in your own Git checkout.
-2. Resolve the combined changes using Git. You can merge or rebase the conflict branch onto the latest target branch, resolve each conflict, and run the project's checks.
-3. Push the resolved history to the configured remote branch.
-4. In Journey's warning, enter the full resolved commit SHA and select **Resume sync**. Keep the original runner running.
-
-The runner verifies that the remote branch points to the selected SHA, uploads its objects, and adopts that exact resolution. It does not replay the saved pre-conflict commits. If the remote has moved again, recovery remains paused until the selected resolution is updated deliberately. The conflict branch and local backup refs remain available as history; sync does not delete them automatically.
-
-## Boundaries
-
-This version tracks one remote branch per repository. Isolated journey branches are not automatically published; the exceptional conflict branch preserves accepted Journey `main`. Git LFS payloads and submodule repository contents remain external. Git object and repository metadata limits still apply, and inbound synchronization validates complete object history before publishing a head.
-
-Sync can bring in binary files, symlinks, submodule pointers and permission changes. Journey's existing editor still supports only its bounded UTF-8 regular-file subset. An active journey with edits overlapping an external change may need deliberate conflict resolution or a fresh journey based on the synchronized head; its old patches remain preserved.
+Run the object/protocol tests, TypeScript check, build and deployment dry run. Inspect the generated deployment configuration for `*/5 * * * *` and the built Worker for both `scheduled` and `queue` handlers. Provision the encryption secret and reconnect tokens before enabling production sync. A local test or dry run is not evidence of production deployment or successful authenticated GitHub publication.

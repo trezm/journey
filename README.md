@@ -13,7 +13,7 @@ Working MVP of journey-based version control. A journey contains described chang
 - Required breaking-change declarations (explicit empty lists allowed), per-integration dispositions, stale-head rejection and repository-state compare-and-swap publication.
 - Owner integration and the Integrate button require approval of the exact current revision. Worker approval remains configurable in repository settings. Builds and tests are deliberately outside the protocol.
 - Email/password accounts and hashed sessions for Cloudflare hosting. Public identity headers are never accepted as authentication.
-- Generic two-way Git synchronization through a separate Node.js/Git runner: automatic publishing, inbound updates, rebasing, exact-SHA push leases, and preserved conflict branches with explicit recovery.
+- Cloudflare-hosted two-way GitHub synchronization: five-minute polling, incremental exact Git-object transfers, fenced push leases, and preserved conflict branches with explicit owner recovery. No local sync process is required.
 
 ## Import and connect Codex
 
@@ -47,7 +47,7 @@ Imported untouched non-text/large files and modes remain in every generated comm
 
 Node.js 22.13+ and Git are required. Install with `pnpm install --frozen-lockfile`, initialize local D1 with `pnpm db:migrate:local`, and run `pnpm dev`. `pnpm deploy:check` builds the complete Cloudflare Worker and validates its bundle without publishing. `pnpm start --port 4173` serves the built Worker locally; both use simulated D1/R2 under `.wrangler/state`.
 
-Deploy to your own Cloudflare account using the checked-in `wrangler.jsonc`, with `DB` (D1), `BUCKET` (R2) and the existing Drizzle migrations. Configure the actual resource IDs/names before `pnpm db:migrate:remote` and `pnpm deploy`; these commands reject the local placeholder D1 ID. The app uses email/password sessions and repository-scoped agent tokens and needs no Sites runtime, connectors or platform service secret.
+Deploy to your own Cloudflare account using the checked-in `wrangler.jsonc`, with `DB` (D1), `BUCKET` (R2), the GitHub sync Queue and `GITHUB_SYNC_KEY`, plus the existing Drizzle migrations. Configure the actual resource IDs/names before `pnpm db:migrate:remote` and `pnpm deploy`; these commands reject the local placeholder D1 ID. The app uses email/password sessions and repository-scoped agent tokens and needs no Sites runtime, connectors or platform service secret.
 
 Follow [the Cloudflare deployment and migration guide](docs/cloudflare.md) for resource setup, domains, CI, moving existing D1/R2 data, mapping former ChatGPT owners and reconnecting local agents. Existing hosted repositories are not copied automatically when a new Worker is deployed.
 
@@ -102,15 +102,13 @@ node cli/agent.mjs patch JOURNEY_ID CHANGESET_ID src/users.rs ./users.rs 'Handle
 
 ## Git remotes and synchronization
 
-In repository **Settings**, configure a credential-free Git remote and target branch, then run the downloadable `git-sync.mjs` with a coordinator connection on a machine with Node.js 22+ and Git:
+In repository **Settings**, enter the HTTPS GitHub repository URL, target branch and a fine-grained token authorized for that repository with Contents read/write permission (and Workflows permission when changing workflow files). Cloudflare polls every five minutes and continues larger transfers through bounded Queue deliveries. GitHub changes enter Journey and accepted Journey commits propagate to GitHub without downloading a runner or checking out a repository in the Worker.
 
-```sh
-node git-sync.mjs --connection journey-connection.json --watch
-```
+The service reuses Journey's R2 Git object store and transfers only missing objects, preserving exact commit bytes and file modes. Exact old-SHA push leases refuse moved remote heads. Divergent histories pause writes and preserve the original Journey head on a conflict branch; the owner selects a resolved GitHub commit. External updates invalidate current locks conservatively; affected journeys retain their work and reconcile before reacquiring.
 
-The runner publishes accepted `main` commits and imports remote changes. When both sides advance it rebases Journey's unpublished commits onto the remote, then pushes with a lease tied to the fetched remote SHA. External updates can invalidate overlapping locks, including posted locks. Affected journeys retain their work and must reconcile and reacquire against the synchronized head. Conflicts pause repository writes and export the original Journey head to a remote conflict branch for manual Git resolution.
+Hosting requires the GitHub sync Queue and private `GITHUB_SYNC_KEY` encryption secret. Tokens are encrypted separately from public repository state. Individual protocol responses and outgoing objects are bounded at 8 MB; oversized transfers pause visibly for owner recovery. See [Git sync setup, limits and recovery](docs/git-sync.md).
 
-Git credentials stay on the runner. The application does not call Git-provider or deployment APIs. A service such as Workers Builds can watch the connected remote independently. The runner must stay running for automatic sync; the request Worker cannot execute native Git. See [Git sync setup and recovery](docs/git-sync.md).
+Existing non-GitHub configurations can continue using the optional legacy Node.js/Git runner with their coordinator connection. Git credentials for those configurations remain on that runner. A deployment service such as Workers Builds can watch the connected remote independently.
 
 ## Git and Cloudflare Artifacts
 
@@ -122,7 +120,7 @@ Cloudflare hosting uses R2 Git-object storage. **Cloudflare Artifacts is not con
 node cli/sync-artifacts.mjs
 ```
 
-This legacy one-way bridge clones this repository and pushes only accepted `main` history to Artifacts using ordinary Git. For continuous two-way synchronization, use the generic Git sync runner above. Journey retains its D1/R2 storage; Artifacts is an ordinary configured Git remote.
+This legacy one-way bridge clones this repository and pushes only accepted `main` history to Artifacts using ordinary Git. For GitHub two-way synchronization, use the hosted connection above. Other existing remotes can use the optional legacy Git sync runner. Journey retains its D1/R2 storage; Artifacts is an ordinary configured Git remote.
 
 ## Validation
 
