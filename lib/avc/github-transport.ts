@@ -74,8 +74,8 @@ export async function readCommitPack(response: Uint8Array, expected: string): Pr
 }
 export class GitHubTransport {
     private api: string; private git: string; private token: string; private send: typeof fetch; private execution?: AbortSignal;
-    constructor(target: GitHubTarget, token: string, send: typeof fetch = fetch.bind(globalThis), execution?: AbortSignal) {
-        this.token = token; this.send = send; this.execution = execution;
+    constructor(target: GitHubTarget, token: string, send: typeof fetch = fetch, execution?: AbortSignal) {
+        this.token = token; this.send = send.bind(globalThis); this.execution = execution;
         this.api = `https://api.github.com/repos/${target.owner}/${target.repo}`;
         this.git = `https://github.com/${target.owner}/${target.repo}.git`;
     }

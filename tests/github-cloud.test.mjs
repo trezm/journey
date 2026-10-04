@@ -145,6 +145,65 @@ test('workerd GitHub transport accepts successful fetches and rejects redirects 
     } finally { await runtime.dispose(); }
 });
 
+test('workerd background sync decrypts repository credentials and observes equal heads through native fetch', async () => {
+    const require = createRequire(import.meta.url);
+    const { Miniflare } = await import(pathToFileURL(require.resolve('miniflare', { paths: [require.resolve('wrangler')] })).href);
+    const { build } = await import(pathToFileURL(require.resolve('esbuild', { paths: [require.resolve('wrangler')] })).href);
+    const token = 'background-runtime-private-token', key = 'b'.repeat(64);
+    let head, authorized = 0, observed = 0;
+    const outboundService = async request => {
+        const url = new URL(request.url);
+        assert.equal(url.hostname, 'api.github.com'); assert.equal(request.method, 'GET');
+        assert.equal(request.headers.get('Authorization'), `Bearer ${token}`);
+        if (url.pathname === '/repos/team/repo') { authorized++; return Response.json({ id: 1, full_name: 'team/repo' }); }
+        assert.equal(url.pathname, '/repos/team/repo/git/ref/heads/main'); observed++;
+        assert(head); return Response.json({ object: { type: 'commit', sha: head } });
+    };
+    const bundle = await build({ stdin: {
+        contents: `import { env } from 'cloudflare:workers';
+        import { GitStore } from './lib/avc/git.ts';
+        import { storeCredential, runCloudSync, publicSync } from './lib/avc/github-cloud.ts';
+        import { encodeState } from './lib/avc/state-codec.ts';
+        import { readProject } from './lib/avc/storage.ts';
+        export default { async fetch(request) {
+            if(new URL(request.url).pathname === '/setup') {
+                const initial=await new GitStore(env.BUCKET,'repo').save({file:'runtime fixture'},undefined,'initial','Owner');
+                const credential=await storeCredential('repo','${token}','https://github.com/team/repo.git','${key}');
+                const state={id:'repo',name:'Repo',head:initial.oid,revisions:{[initial.oid]:initial.meta},journeys:[],leases:[],waiting:[],events:[],sequence:0,integrationCursor:0,generation:0,receipts:{},requireApproval:true,
+                    sync:{remote:'https://github.com/team/repo.git',branch:'main',enabled:true,status:'error',error:'prior failed attempt',updatedAt:1,cloud:{credential,generation:'runtime-generation'}}};
+                await env.DB.prepare('INSERT INTO projects(id,owner,name,version,state) VALUES(?,?,?,?,?)').bind('repo','owner','Repo',0,encodeState(state)).run();
+                return Response.json({head:initial.oid,credential});
+            }
+            const claimed=await runCloudSync('repo','${key}');
+            const state=(await readProject('repo')).state;
+            return Response.json({claimed,head:state.head,sync:publicSync(state)});
+        } };`,
+        resolveDir: process.cwd(), loader: 'ts',
+    }, bundle: true, write: false, format: 'esm', platform: 'browser', external: ['node:zlib', 'cloudflare:workers'] });
+    const runtime = new Miniflare({ modules: true, compatibilityDate: '2026-05-15', compatibilityFlags: ['nodejs_compat'], script: bundle.outputFiles[0].text,
+        d1Databases: { DB: 'runtime-db' }, r2Buckets: ['BUCKET'], outboundService });
+    try {
+        const db = await runtime.getD1Database('DB');
+        await db.prepare('CREATE TABLE projects(id TEXT PRIMARY KEY,owner TEXT NOT NULL,name TEXT NOT NULL,version INTEGER NOT NULL,state TEXT NOT NULL)').run();
+        const setup = await runtime.dispatchFetch('https://worker.test/setup'); assert.equal(setup.status, 200);
+        const initial = await setup.json(); head = initial.head;
+        const bucket = await runtime.getR2Bucket('BUCKET');
+        const encrypted = await (await bucket.get(`repo/cloud-credentials/${initial.credential}`)).text();
+        assert(!encrypted.includes(token)); assert.equal(typeof JSON.parse(encrypted).ciphertext, 'string');
+        const beforeKeys = (await bucket.list()).objects.map(entry => entry.key).sort();
+        const response = await runtime.dispatchFetch('https://worker.test/sync'); assert.equal(response.status, 200);
+        const result = await response.json();
+        assert.equal(result.claimed, true); assert.equal(result.head, head); assert.equal(result.sync.status, 'idle', JSON.stringify(result));
+        assert.equal(result.sync.lastRemoteHead, head); assert.equal(result.sync.lastSyncedHead, head); assert(result.sync.lastCheckedAt > 0);
+        assert.equal(result.sync.error, undefined); assert.equal(result.sync.run, undefined); assert.equal(result.sync.progress, null);
+        assert(!JSON.stringify(result).includes(token)); assert(!JSON.stringify(result).includes(initial.credential));
+        const stored = decodeState((await db.prepare('SELECT state FROM projects WHERE id=?').bind('repo').first()).state);
+        assert.equal(stored.sync.cloud.lease, undefined); assert(stored.sync.cloud.nextAttemptAt > Date.now());
+        assert.equal(authorized, 1); assert.equal(observed, 1);
+        assert.deepEqual((await bucket.list()).objects.map(entry => entry.key).sort(), beforeKeys);
+    } finally { await runtime.dispose(); }
+});
+
 test('hosted fast-forward import completes without a file/tree snapshot or token disclosure', async t => {
     const bucket = new Bucket(), remoteBucket = new Bucket(), git = new GitStore(bucket, 'repo'), remoteGit = new GitStore(remoteBucket, 'remote');
     const initial = await git.save({ file: 'initial' }, undefined, 'initial', 'Owner');
