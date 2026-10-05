@@ -278,8 +278,9 @@ export function acquire(s: State, j: Journey, changeset: string, scopes: Scope[]
     // Override any caller-supplied retained property with the trusted Journey history.
     const leases = mapped.map(m => ({ ...m, id: crypto.randomUUID(), token: crypto.randomUUID(), generation: ++s.generation, journey: j.id, changeset, revision, retained: j.posted ? true : undefined, expires: j.posted ? retainedExpiry : now + 600000 }));
     s.leases.push(...leases);
+    const requestId = s.waiting.find(w => w.journey === j.id && w.changeset === changeset)?.id;
     s.waiting = s.waiting.filter(w => w.journey !== j.id || w.changeset !== changeset);
-    emit(s, 'lock.granted', actor, { locks: leases.map(l => ({ id: l.id, generation: l.generation, path: l.path, start: l.start, end: l.end, expires: l.expires, ...(l.retained ? { retained: true } : {}) })) }, j.id, [j.id]);
+    emit(s, 'lock.granted', actor, { ...(requestId ? { requestId } : {}), locks: leases.map(l => ({ id: l.id, generation: l.generation, path: l.path, start: l.start, end: l.end, expires: l.expires, ...(l.retained ? { retained: true } : {}) })) }, j.id, [j.id]);
     return { queued: false, locks: leases };
 }
 export function checkTokens(s: State, j: Journey, tokens: string[], now = Date.now()) { const held = s.leases.filter(l => l.journey === j.id); insist(held.length > 0, 'locks_required', 'Acquire valid locks for the published changes before submitting or integrating.'); insist(Array.isArray(tokens) && held.every(l => leaseActive(l, now) && tokens.includes(l.token)), 'invalid_lease', 'Return every current journey lock token. Expired or superseded tokens cannot publish.'); return held; }

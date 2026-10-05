@@ -1,4 +1,4 @@
-import { diff, leaseActive, lines, projectRange, touches, type Files, type Hunk, type Journey, type State, type Waiting } from './core.ts';
+import { diff, leaseActive, lines, overlap, projectRange, touches, type Files, type Hunk, type Journey, type State, type Waiting } from './core.ts';
 
 export type LiveRegion = {
     /** One-based, inclusive coordinates in the snapshot's canonical main revision. */
@@ -10,7 +10,20 @@ export type LiveRegion = {
     changesetIds: string[];
     approximate: boolean;
 };
-export type LiveFile = { path: string; lineCount: number; exists: boolean; regions: LiveRegion[] };
+export type LiveHeldLock = { id: string; journey: string; changeset: string; conflictingRequestIds: string[] };
+export type LiveFile = {
+    path: string;
+    lineCount: number;
+    exists: boolean;
+    regions: LiveRegion[];
+    heldLocks: LiveHeldLock[];
+    /** Unique held locks currently blocking at least one other journey's request. */
+    conflictCount: number;
+    lockCount: number;
+    waitingCount: number;
+    /** Last recorded patch or lock activity, never the snapshot polling time. Zero means unknown. */
+    updatedAt: number;
+};
 export type LiveChangeset = {
     id: string;
     journey: string;
@@ -78,7 +91,7 @@ export async function liveSnapshot(state: State, readFiles: (revision: string) =
     const file = (path: string) => {
         let value = files.get(path);
         if (!value) {
-            value = { path, lineCount: Math.max(1, lines(content(canonical, path)).length), exists: Object.hasOwn(canonical, path), regions: [] };
+            value = { path, lineCount: Math.max(1, lines(content(canonical, path)).length), exists: Object.hasOwn(canonical, path), regions: [], heldLocks: [], conflictCount: 0, lockCount: 0, waitingCount: 0, updatedAt: 0 };
             files.set(path, value);
         }
         return value;
@@ -90,6 +103,10 @@ export async function liveSnapshot(state: State, readFiles: (revision: string) =
     for (const journey of state.journeys) for (const changeset of journey.changesets) {
         const paths = new Set(changeset.patches.flatMap(patch => patch.changes.map(change => change.path)));
         paths.forEach(file);
+        for (const patch of changeset.patches) for (const change of patch.changes) {
+            const entry = file(change.path);
+            entry.updatedAt = Math.max(entry.updatedAt, patch.at ?? 0);
+        }
         pathSets.set(changeset.id, paths); lockSets.set(changeset.id, new Set()); waitingSets.set(changeset.id, new Set());
         changesets.set(changeset.id, {
             id: changeset.id, journey: journey.id, title: journey.title, description: changeset.description, status: journey.status,
@@ -107,8 +124,15 @@ export async function liveSnapshot(state: State, readFiles: (revision: string) =
         if (overlay.lock) lockSets.get(overlay.changeset)?.add(overlay.lock);
         if (overlay.waiting) waitingSets.get(overlay.changeset)?.add(overlay.waiting);
     };
-    for (const lease of state.leases) {
-        if (!activeJourneys.has(lease.journey) || !leaseActive(lease, now) || !changesets.has(lease.changeset)) continue;
+    const activeLeases = state.leases.filter(lease => activeJourneys.has(lease.journey) && leaseActive(lease, now) && changesets.get(lease.changeset)?.journey === lease.journey);
+    const leasesByPath = new Map<string, typeof activeLeases>();
+    const heldById = new Map<string, LiveHeldLock>();
+    for (const lease of activeLeases) {
+        if (heldById.has(lease.id)) continue;
+        const held = { id: lease.id, journey: lease.journey, changeset: lease.changeset, conflictingRequestIds: [] as string[] };
+        file(lease.path).heldLocks.push(held); heldById.set(lease.id, held);
+        const pathLeases = leasesByPath.get(lease.path) ?? [];
+        pathLeases.push(lease); leasesByPath.set(lease.path, pathLeases);
         add(lease.path, lease.whole ? 0 : lease.canonicalStart, lease.whole ? file(lease.path).lineCount : lease.canonicalEnd,
             { lock: lease.id, changeset: lease.changeset, approximate: !lease.whole && !Object.hasOwn(canonical, lease.path) });
     }
@@ -116,7 +140,7 @@ export async function liveSnapshot(state: State, readFiles: (revision: string) =
     // while keeping at most canonical + one source snapshot in memory. Reads are serial.
     const byRevision = new Map<string, Waiting[]>(), waitingIds = new Set<string>();
     for (const waiting of state.waiting) {
-        if (!activeJourneys.has(waiting.journey) || !changesets.has(waiting.changeset) || waitingIds.has(waiting.id)) continue;
+        if (!activeJourneys.has(waiting.journey) || changesets.get(waiting.changeset)?.journey !== waiting.journey || waitingIds.has(waiting.id)) continue;
         waitingIds.add(waiting.id);
         const group = byRevision.get(waiting.revision) ?? [];
         group.push(waiting); byRevision.set(waiting.revision, group);
@@ -133,6 +157,15 @@ export async function liveSnapshot(state: State, readFiles: (revision: string) =
                 [start, end] = projectRange(scope.start - 1, scope.end, hunks);
                 approximate = !Object.hasOwn(source, scope.path) || !Object.hasOwn(canonical, scope.path) || hunks.some(hunk => touches(scope.start - 1, scope.end, hunk));
             }
+            // Use the same conservative canonical boundary rule as acquisition. Visual
+            // regions alone cannot identify conflicts (adjacent scopes can block).
+            for (const lease of leasesByPath.get(scope.path) ?? []) {
+                if (lease.journey !== waiting.journey && (scope.whole || lease.whole || overlap({ start, end }, { start: lease.canonicalStart, end: lease.canonicalEnd }))) {
+                    const requests = heldById.get(lease.id)!.conflictingRequestIds;
+                    if (!requests.includes(waiting.id)) requests.push(waiting.id);
+                }
+            }
+            file(scope.path).updatedAt = Math.max(file(scope.path).updatedAt, waiting.at);
             add(scope.path, start, end, { waiting: waiting.id, changeset: waiting.changeset, approximate });
         }
     }
@@ -141,6 +174,69 @@ export async function liveSnapshot(state: State, readFiles: (revision: string) =
         changeset.paths = [...pathSets.get(changeset.id)!].sort();
         changeset.lockCount = lockSets.get(changeset.id)!.size;
         changeset.waitingCount = waitingSets.get(changeset.id)!.size;
+    }
+    // Grant history also identifies released locks, which no longer exist in state.leases.
+    // Do not use expiry deadlines or refresh time as a file's activity timestamp.
+    const lockPaths = new Map(state.leases.map(lease => [lease.id, lease.path]));
+    const journeyLockPaths = new Map<string, Set<string>>();
+    for (const event of state.events) {
+        if (!['lock.granted', 'lock.invalidated'].includes(event.type) || !Array.isArray(event.data.locks)) continue;
+        for (const value of event.data.locks) {
+            if (!value || typeof value !== 'object' || typeof value.id !== 'string' || typeof value.path !== 'string') continue;
+            lockPaths.set(value.id, value.path);
+            if (event.journey) {
+                const paths = journeyLockPaths.get(event.journey) ?? new Set<string>();
+                paths.add(value.path); journeyLockPaths.set(event.journey, paths);
+            }
+        }
+    }
+    const latestQueueUpdate = new Map<string, number>();
+    for (const event of state.events) if (event.type === 'lock.queue_updated' || event.type === 'lock.queued') latestQueueUpdate.set(String(event.data.requestId), event.id);
+    const waitingById = new Map(state.waiting.map(waiting => [waiting.id, waiting]));
+    const touch = (path: string, at: number) => { const entry = files.get(path); if (entry) entry.updatedAt = Math.max(entry.updatedAt, at); };
+    const queuedPaths = new Map<string, { journey?: string; paths: Set<string> }>();
+    for (const event of state.events) {
+        if (['lock.granted', 'lock.invalidated'].includes(event.type) && Array.isArray(event.data.locks)) {
+            for (const value of event.data.locks) if (value && typeof value === 'object' && typeof value.path === 'string') touch(value.path, event.at);
+            if (event.type === 'lock.granted' && typeof event.data.requestId === 'string') {
+                // A successful retry can move to an unblocked file and consume its old
+                // request. Other changesets in the same journey may still be queued.
+                for (const path of queuedPaths.get(event.data.requestId)?.paths ?? []) touch(path, event.at);
+                queuedPaths.delete(event.data.requestId);
+            }
+        } else if (event.type === 'lock.expired' && typeof event.data.lockId === 'string') {
+            const path = lockPaths.get(event.data.lockId); if (path) touch(path, event.at);
+        } else if (event.type === 'lock.queued' || event.type === 'lock.queue_updated') {
+            const requestId = String(event.data.requestId);
+            const waiting = waitingById.get(requestId);
+            // Moving a request changes the old blockers' activity too.
+            for (const path of queuedPaths.get(requestId)?.paths ?? []) touch(path, event.at);
+            const requestPaths = new Set<string>();
+            // The original queue event predates replacement scopes; use only the newest
+            // request update for those scopes. Blocker paths remain historically exact.
+            if (waiting && latestQueueUpdate.get(String(event.data.requestId)) === event.id) {
+                for (const scope of waiting.scopes) { touch(scope.path, event.at); requestPaths.add(scope.path); }
+            }
+            if (Array.isArray(event.data.conflicts)) for (const id of event.data.conflicts) {
+                const path = lockPaths.get(String(id)); if (path) { touch(path, event.at); requestPaths.add(path); }
+            }
+            queuedPaths.set(requestId, { journey: event.journey, paths: requestPaths });
+        } else if (event.journey && ['journey.integrated', 'journey.abandoned', 'review.requested'].includes(event.type)) {
+            for (const path of journeyLockPaths.get(event.journey) ?? []) touch(path, event.at);
+            if (event.type !== 'review.requested') for (const [id, queued] of queuedPaths) {
+                if (queued.journey === event.journey) {
+                    for (const path of queued.paths) touch(path, event.at);
+                    queuedPaths.delete(id);
+                }
+            }
+        }
+    }
+    for (const entry of files.values()) {
+        entry.heldLocks.sort((a, b) => a.id.localeCompare(b.id));
+        entry.heldLocks.forEach(held => held.conflictingRequestIds.sort());
+        entry.lockCount = entry.heldLocks.length;
+        entry.conflictCount = entry.heldLocks.filter(held => held.conflictingRequestIds.length > 0).length;
+        entry.waitingCount = new Set(entry.regions.flatMap(region => region.waitingIds)).size;
     }
     const resultFiles = [...files.values()].sort((a, b) => a.path.localeCompare(b.path));
     return {

@@ -129,8 +129,8 @@ test('new and empty files, historical deleted paths and same request over multip
         const entry = result.files.find(file => file.path === path);
         assert.equal(entry.exists, false); assert.equal(entry.lineCount, 1); assert.equal(entry.regions[0].status, 'waiting');
     }
-    assert.deepEqual(result.files.find(file => file.path === 'deleted.txt'), { path: 'deleted.txt', exists: false, lineCount: 1, regions: [] });
-    assert.deepEqual(result.files.find(file => file.path === 'empty.txt'), { path: 'empty.txt', exists: true, lineCount: 1, regions: [] });
+    assert.deepEqual(result.files.find(file => file.path === 'deleted.txt'), { path: 'deleted.txt', exists: false, lineCount: 1, regions: [], heldLocks: [], conflictCount: 0, lockCount: 0, waitingCount: 0, updatedAt: 0 });
+    assert.deepEqual(result.files.find(file => file.path === 'empty.txt'), { path: 'empty.txt', exists: true, lineCount: 1, regions: [], heldLocks: [], conflictCount: 0, lockCount: 0, waitingCount: 0, updatedAt: 0 });
     assert.equal(result.summary.waitingCount, 1); assert.equal(result.changesets.find(item => item.id === 'waiter-step').waitingCount, 1);
     assert.deepEqual(result.changesets.find(item => item.id === 'holder-step').paths, ['__proto__', 'deleted.txt', 'new.txt']);
 });
@@ -214,4 +214,120 @@ test('actual live HTTP handler authenticates, strips private data and expires gr
     assert.deepEqual(region(result, 3).lockIds, []); assert.equal(region(result, 3).status, 'waiting');
     assert.equal(decodeState(db.rows.get('repo').state).leases.length, 0);
     assert.equal(/private-receipt-token|local-test-agent|canonicalStart|"token"|"receipts"/.test(JSON.stringify(result)), false);
+});
+
+test('conflict counts deduplicate held locks and use protocol boundaries rather than visual overlap', async () => {
+    const state = fixture(), holder = journey(state, 'holder'), waiter = journey(state, 'waiter'), second = journey(state, 'second');
+    const grant = request(state, holder, [scope(2), scope(5)]);
+    const first = request(state, waiter, [scope(3), scope(3), scope(6)]);
+    request(state, second, [scope(3)]);
+    const value = (await snapshot(state)).files[0];
+    assert.equal(value.lockCount, 2); assert.equal(value.conflictCount, 2);
+    assert.equal(value.waitingCount, 2);
+    assert.equal(value.heldLocks.find(lock => lock.id === grant.locks[0].id).conflictingRequestIds.length, 2);
+    assert.deepEqual(value.heldLocks.find(lock => lock.id === grant.locks[1].id).conflictingRequestIds, [first.requestId]);
+    assert.equal(value.regions.find(region => region.start === 3).lockIds.length, 0, 'adjacent conflict has no fabricated visual overlap');
+    assert.ok(value.heldLocks.every(lock => lock.journey === holder.id && lock.changeset === holder.changesets[0].id));
+});
+
+test('waiting-only and unrelated scopes do not turn historical changes into ownership or conflicts', async () => {
+    const state = fixture(), holder = journey(state, 'holder'), waiter = journey(state, 'waiter');
+    request(state, holder, [scope(2)]); request(state, waiter, [scope(2), scope(7)]);
+    state.waiting[0].scopes.push({ path: 'requested-only.txt', start: 1, end: 1, whole: true });
+    holder.changesets[0].patches.push({ id: 'p', at: 10, changes: [{ path: 'history.txt', hunks: [] }] });
+    const result = await snapshot(state);
+    const only = result.files.find(file => file.path === 'requested-only.txt');
+    assert.equal(only.lockCount, 0); assert.equal(only.conflictCount, 0); assert.equal(only.waitingCount, 1);
+    assert.deepEqual(only.heldLocks, []);
+    assert.deepEqual(result.files.find(file => file.path === 'history.txt').heldLocks, []);
+    assert.equal(result.files.find(file => file.path === 'file.txt').conflictCount, 1);
+    state.leases[0].expires = now - 1;
+    assert.equal((await snapshot(state)).files.find(file => file.path === 'file.txt').conflictCount, 0, 'available waiting requests are no longer conflicts');
+});
+
+test('same-journey requests do not conflict with owned locks and malformed ownership stays out', async () => {
+    const state = fixture(), holder = journey(state, 'holder'), other = journey(state, 'other');
+    request(state, holder, [scope(2)]);
+    state.waiting.push({ id: 'own', journey: holder.id, changeset: holder.changesets[0].id, scopes: [scope(2)], revision: state.head, actor: holder.id, at: now });
+    state.leases.push({ ...state.leases[0], id: 'mismatch', changeset: other.changesets[0].id });
+    const value = (await snapshot(state)).files[0];
+    assert.equal(value.conflictCount, 0); assert.equal(value.lockCount, 1);
+});
+
+test('file activity dates come from patches, grants, queues and release events rather than refreshes', async () => {
+    const state = fixture(), holder = journey(state, 'holder'), waiter = journey(state, 'waiter');
+    request(state, holder, [scope(2)]); request(state, waiter, [scope(2)]);
+    state.events[0].at = 2000; state.events[1].at = 3000;
+    let result = await snapshot(state, 4000);
+    assert.equal(result.files[0].updatedAt, 3000);
+    assert.equal((await snapshot(state, 5000)).files[0].updatedAt, 3000);
+    holder.changesets[0].patches.push({ id: 'p', at: 6000, changes: [{ path: 'file.txt', hunks: [] }] });
+    assert.equal((await snapshot(state, 7000)).files[0].updatedAt, 6000);
+    expire(state, now + 600001); state.events.find(event => event.type === 'lock.expired').at = 8000;
+    result = await snapshot(state, now + 600001);
+    assert.equal(result.files[0].updatedAt, 8000); assert.equal(result.files[0].lockCount, 0);
+    assert.equal(result.files[0].conflictCount, 0);
+});
+
+test('queue retry projections, whole-file locks and retained review locks contribute to accurate ownership', async () => {
+    const state = fixture(), holder = journey(state, 'holder'), waiter = journey(state, 'waiter');
+    request(state, holder, [{ ...scope(1), whole: true }]); request(state, waiter, [scope(8)]);
+    state.leases[0].retained = true; state.leases[0].expires = 1; holder.status = 'review';
+    const result = await snapshot(state, now + 600001);
+    assert.equal(result.files[0].lockCount, 1); assert.equal(result.files[0].conflictCount, 1);
+    holder.status = 'abandoned';
+    assert.equal((await snapshot(state)).files[0].lockCount, 0);
+});
+
+test('invalidation and abandoned waiters update affected files when held locks or conflicts disappear', async () => {
+    const state = fixture(), holder = journey(state, 'holder'), waiter = journey(state, 'waiter');
+    request(state, holder, [scope(2)]); request(state, waiter, [scope(2)]);
+    state.events[0].at = 100; state.events[1].at = 200; state.waiting[0].at = 200;
+    waiter.status = 'abandoned'; state.waiting = [];
+    state.events.push({ id: ++state.sequence, type: 'journey.abandoned', at: 300, journey: waiter.id, data: {}, targets: [], actor: waiter.id });
+    let result = await snapshot(state);
+    assert.equal(result.files[0].conflictCount, 0); assert.equal(result.files[0].updatedAt, 300);
+    state.events.push({ id: ++state.sequence, type: 'lock.invalidated', at: 400, journey: holder.id, data: { locks: state.leases.map(({ id, path }) => ({ id, path })) }, targets: [], actor: 'sync' });
+    state.leases = [];
+    result = await snapshot(state);
+    assert.equal(result.files[0].lockCount, 0); assert.equal(result.files[0].updatedAt, 400);
+});
+
+test('moving a queued request updates both previous and current blocker file dates', async () => {
+    const state = fixture(), holder = journey(state, 'holder'), waiter = journey(state, 'waiter');
+    request(state, holder, [{ ...scope(1), whole: true }, { path: 'other.txt', start: 1, end: 1, whole: true }]);
+    request(state, waiter, [scope(2)]);
+    request(state, waiter, [{ path: 'other.txt', start: 1, end: 1, whole: true }]);
+    state.events.forEach((event, index) => { event.at = (index + 1) * 100; }); state.waiting[0].at = 200;
+    const result = await snapshot(state);
+    assert.equal(result.files.find(file => file.path === 'file.txt').updatedAt, 300);
+    assert.equal(result.files.find(file => file.path === 'other.txt').updatedAt, 300);
+    assert.equal(result.files.find(file => file.path === 'file.txt').conflictCount, 0);
+    assert.equal(result.files.find(file => file.path === 'other.txt').conflictCount, 1);
+});
+
+test('successful retry on a new file updates only its consumed queue and preserves another changeset queue', async () => {
+    const state = fixture(), holder = journey(state, 'holder'), waiter = journey(state, 'waiter');
+    waiter.changesets.push({ id: 'second-step', description: 'Other work', patches: [] });
+    const files = { ...text, 'other.txt': 'other', 'free.txt': 'free' };
+    const whole = path => ({ path, start: 1, end: 1, whole: true });
+    const grant = acquire(state, holder, holder.changesets[0].id, [whole('file.txt'), whole('other.txt')], state.head, files, files, holder.actor, now);
+    const first = acquire(state, waiter, waiter.changesets[0].id, [whole('file.txt')], state.head, files, files, waiter.actor, now);
+    const second = acquire(state, waiter, 'second-step', [whole('other.txt')], state.head, files, files, waiter.actor, now);
+    const success = acquire(state, waiter, waiter.changesets[0].id, [whole('free.txt')], state.head, files, files, waiter.actor, now);
+    assert.equal(success.queued, false); assert.equal(state.events.at(-1).data.requestId, first.requestId);
+    assert.deepEqual(state.waiting.map(waiting => waiting.id), [second.requestId]);
+    assert.equal(grant.locks.length, 2); assert.equal(success.locks.length, 1, 'acquisition behavior is unchanged');
+    state.events.forEach((event, index) => { event.at = (index + 1) * 100; }); state.waiting[0].at = 300;
+    let result = await liveSnapshot(state, async () => files, now);
+    assert.equal(result.files.find(file => file.path === 'file.txt').conflictCount, 0);
+    assert.equal(result.files.find(file => file.path === 'file.txt').updatedAt, 400);
+    assert.equal(result.files.find(file => file.path === 'other.txt').conflictCount, 1);
+    assert.equal(result.files.find(file => file.path === 'other.txt').updatedAt, 300);
+    assert.equal(result.files.find(file => file.path === 'free.txt').updatedAt, 400);
+    waiter.status = 'abandoned'; state.waiting = [];
+    state.events.push({ id: ++state.sequence, type: 'journey.abandoned', at: 500, journey: waiter.id, data: {}, targets: [], actor: waiter.actor });
+    result = await liveSnapshot(state, async () => files, now);
+    assert.equal(result.files.find(file => file.path === 'file.txt').updatedAt, 400, 'consumed old queue is not touched again');
+    assert.equal(result.files.find(file => file.path === 'other.txt').updatedAt, 500, 'other queue stays tracked through its later removal');
 });
