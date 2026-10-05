@@ -57,8 +57,8 @@
     "AVC_ACCESS_TEAM_DOMAIN": "mertz.cloudflareaccess.com",
     "AVC_ACCESS_AUD": "875efad6b43955c6a936e44b379a3074a7bd71f7309e8539cda974f4d39d0681",
     "AVC_OAUTH_ORIGIN": "https://journey.peter-s-mertz.workers.dev",
-    "AVC_GITHUB_CLIENT_ID": "",
-    "AVC_GITLAB_CLIENT_ID": "",
+    "AVC_GITHUB_CLIENT_ID": "Ov23liSxarsWsiRzCSbP",
+    "AVC_GITLAB_CLIENT_ID": "d8b73200da34d147977edf840ae2cbf5e39facd5be56fbfb1bb259ec47d31ef3",
     "AVC_AUTH_MODE": "password"
   }
 }
