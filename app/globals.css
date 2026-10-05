@@ -15,3 +15,32 @@
 .onboarding .terminal { white-space:pre-wrap; overflow-wrap:anywhere; }
 
 .integrate-button:disabled{background:#e4e9f0!important;color:#697588;opacity:1}
+
+/* Keep repository navigation stable while journey details change below it. */
+.repository-heading { margin-bottom:20px; }
+.repository-heading > div, .journey-heading > div { min-width:0; }
+.repository-heading h1, .journey-heading h2, .journey-heading p { overflow-wrap:anywhere; }
+.repository-tabs { max-width:100%; margin-bottom:18px; overscroll-behavior-x:contain; }
+.repository-tabs button { flex-shrink:0; }
+.repository-tabs button:focus-visible { outline:2px solid #c84c20; outline-offset:-2px; border-radius:3px; }
+.repository-overview { margin-bottom:28px; }
+.journey-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:20px; margin:4px 0 24px; padding-bottom:22px; border-bottom:1px solid #dce3ed; }
+.journey-heading h2 { font-size:1.5rem; font-weight:650; line-height:1.35; letter-spacing:-.4px; }
+.journey-heading p { margin-top:8px; max-width:760px; font-size:.9375rem; }
+.journey-heading .status { flex-shrink:0; margin-top:20px; }
+.breadcrumb { min-width:0; flex:1; }
+.breadcrumb > a { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.breadcrumb > svg, .topbar-right { flex-shrink:0; }
+.content-grid > section { min-width:0; }
+@media(max-width:700px) {
+    .repository-heading { margin-bottom:18px; }
+    .repository-tabs { margin-bottom:16px; }
+    .repository-overview { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); padding:0; margin-bottom:24px; }
+    .repository-overview > div { padding:14px 16px; border-right:0; }
+    .repository-overview > div:nth-child(4) { display:block; }
+    .repository-overview > div:nth-child(odd) { border-right:1px solid #e2e7ef; }
+    .repository-overview > div:nth-child(-n+2) { border-bottom:1px solid #e2e7ef; }
+    .journey-heading { flex-direction:column; gap:12px; padding-bottom:18px; margin-bottom:20px; }
+    .journey-heading h2 { font-size:1.25rem; }
+    .journey-heading .status { margin-top:0; }
+}
