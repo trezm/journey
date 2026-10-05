@@ -8,6 +8,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import ts from 'typescript';
 import { diff } from '../lib/avc/core.ts';
 import * as helpers from '../lib/patch-diff.ts';
+import * as reviewHelpers from '../lib/patch-review.ts';
 
 const sections = (before, after, context) => helpers.patchSections(before, after, diff(before, after), context);
 
@@ -88,28 +89,38 @@ const beforeText = 'const oldValue = 1;\nreturn oldValue;\n';
 const afterText = 'const newValue = 2;\nreturn newValue;\n';
 const patch = { id: 'p1', before: 'before-immutable', after: 'after-immutable', at: 0, description: 'Rename value', changes: [{ path: 'app.ts', hunks: diff(beforeText, afterText) }] };
 function renderViewer(options = {}) {
-    const calls = [], controls = [], updates = [], highlightCalls = [];
+    const calls = [], controls = [], updates = [], highlightCalls = [], state = [];
+    const storage = options.storage ?? new Map();
+    let cursor = 0;
     const source = readFileSync(new URL('../components/patch-viewer.tsx', import.meta.url), 'utf8');
     const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } }).outputText;
     const require = createRequire(import.meta.url), testModule = { exports: {} };
     const jsx = require('react/jsx-runtime');
     const mockRequire = name => {
-        if (name === 'react') return { ...React, useState: initial => [typeof initial === 'boolean' ? options.requested ?? false : options.view ?? 'split', value => updates.push(value)] };
-        if (name === 'react/jsx-runtime') return { ...jsx, ...Object.fromEntries(['jsx', 'jsxs'].map(method => [method, (type, props, key) => { if (type === 'details' || type === 'button') controls.push({ type, ...props }); return jsx[method](type, props, key); }])) };
+        if (name === 'react') return { ...React, useSyncExternalStore: (_subscribe, snapshot) => snapshot(), useState: initial => {
+            const index = cursor++;
+            if (!(index in state)) state[index] = index === 0 ? options.requested ?? false : initial === 'split' ? options.view ?? 'split' : typeof initial === 'function' ? initial() : initial;
+            return [state[index], value => { state[index] = typeof value === 'function' ? value(state[index]) : value; updates.push(value); }];
+        } };
+        if (name === 'react/jsx-runtime') return { ...jsx, ...Object.fromEntries(['jsx', 'jsxs'].map(method => [method, (type, props, key) => { if (type === 'details' || type === 'button' || type === 'input') controls.push({ type, ...props }); return jsx[method](type, props, key); }])) };
         if (name === '@/hooks/use-repository') return { useRepositoryFiles: (project, revision) => {
             calls.push({ project, revision });
             return { status: options.status ?? 'ready', error: options.error ?? '', files: revision === patch.before ? options.before ?? { 'app.ts': beforeText } : options.after ?? { 'app.ts': afterText }, reload: () => {} };
         } };
         if (name === '@/lib/patch-diff') return helpers;
+        if (name === '@/lib/patch-review') return reviewHelpers;
         if (name === '@/lib/syntax-highlight') return { highlightCode: (path, source) => { highlightCalls.push({ path, source }); return { language: 'typescript', lines: source.split('\n').map(value => [{ value, classes: [] }]) }; } };
         if (name === '@/components/syntax-code') return { SyntaxLine: ({ tokens }) => React.createElement('span', {}, tokens.map(token => token.value).join('')) };
         if (name.endsWith('.module.css')) return { default: new Proxy({}, { get: (_, key) => key }) };
         if (name === 'lucide-react') return { GitCommitHorizontal: () => null, ChevronDown: () => null };
         return require(name);
     };
-    runInNewContext(compiled, { module: testModule, exports: testModule.exports, require: mockRequire });
-    const html = renderToStaticMarkup(React.createElement(testModule.exports.PatchViewer, { project: 'project-a', patch: options.patch ?? patch, number: '1.1' }));
-    return { html, calls, controls, updates, highlightCalls };
+    runInNewContext(compiled, { module: testModule, exports: testModule.exports, require: mockRequire, window: { localStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) } } });
+    function render() {
+        cursor = 0; controls.length = 0;
+        return renderToStaticMarkup(React.createElement(testModule.exports.PatchViewer, { project: options.project ?? 'project-a', patch: options.patch ?? patch, number: '1.1' }));
+    }
+    return { html: render(), render, calls, controls, updates, highlightCalls, storage };
 }
 
 test('collapsed patch summaries do not request snapshots; expanding starts lazy loading', () => {
@@ -159,4 +170,46 @@ test('viewer identifies empty creations/deletions, newline changes and safely re
     const html = renderViewer({ requested: true, patch: htmlPatch, before: {}, after: { 'app.ts': '<script>attack()</script>' } }).html;
     assert.match(html, /&lt;script&gt;/);
     assert.doesNotMatch(html, /<script>/);
+});
+
+test('file disclosure controls have accessible state and operate independently', () => {
+    const secondPath = 'src/other.ts';
+    const view = renderViewer({ requested: true, patch: { ...patch, changes: [...patch.changes, { path: secondPath, hunks: diff('', 'second file') }] }, after: { 'app.ts': afterText, [secondPath]: 'second file' } });
+    const collapse = view.controls.find(control => control['aria-label'] === 'Collapse app.ts');
+    assert.equal(collapse.type, 'button');
+    assert.equal(collapse['aria-expanded'], true);
+    assert.ok(collapse['aria-controls']);
+    collapse.onClick();
+    let html = view.render();
+    assert.doesNotMatch(html, /const oldValue/);
+    assert.match(html, /second file/);
+    assert.equal(view.controls.find(control => control['aria-label'] === `Collapse ${secondPath}`)['aria-expanded'], true);
+    view.controls.find(control => control['aria-label'] === 'Expand app.ts').onClick();
+    html = view.render();
+    assert.match(html, /const oldValue/);
+    assert.match(html, /0 of 2 files viewed/);
+});
+
+test('marking a file viewed collapses it, updates progress, and persists only for the immutable patch and repository', () => {
+    const view = renderViewer({ requested: true });
+    const checkbox = () => view.controls.find(control => control['aria-label'] === 'Mark app.ts as viewed');
+    assert.equal(checkbox().checked, false);
+    checkbox().onChange({ target: { checked: true } });
+    let html = view.render();
+    assert.match(html, /1 of 1 files viewed/);
+    assert.doesNotMatch(html, /const oldValue/);
+    assert.equal(checkbox().checked, true);
+    view.controls.find(control => control['aria-label'] === 'Expand app.ts').onClick();
+    html = view.render();
+    assert.match(html, /const oldValue/);
+    assert.equal(checkbox().checked, true);
+    const revisited = renderViewer({ requested: true, storage: view.storage });
+    assert.match(revisited.html, /1 of 1 files viewed/);
+    assert.doesNotMatch(revisited.html, /const oldValue/);
+    assert.match(renderViewer({ requested: true, storage: view.storage, patch: { ...patch, id: 'p2', after: 'new-immutable' } }).html, /0 of 1 files viewed/);
+    assert.match(renderViewer({ requested: true, storage: view.storage, project: 'project-b' }).html, /0 of 1 files viewed/);
+    checkbox().onChange({ target: { checked: false } });
+    assert.match(view.render(), /0 of 1 files viewed/);
+    assert.match(view.render(), /const oldValue/);
+    assert.match(renderViewer({ requested: true, storage: view.storage }).html, /0 of 1 files viewed/);
 });

@@ -1,10 +1,11 @@
 'use client';
 
-import { Fragment, useMemo, useState } from 'react';
+import { Fragment, useId, useMemo, useState, useSyncExternalStore } from 'react';
 import { ChevronDown, GitCommitHorizontal } from 'lucide-react';
 import type { Files, Patch } from '@/lib/avc/core';
 import { useRepositoryFiles } from '@/hooks/use-repository';
 import { patchFileStatus, patchSections, type DiffLine } from '@/lib/patch-diff';
+import { PatchReview, patchReviewKey } from '@/lib/patch-review';
 import { highlightCode } from '@/lib/syntax-highlight';
 import { SyntaxLine } from '@/components/syntax-code';
 import styles from './patch-viewer.module.css';
@@ -20,12 +21,16 @@ export function PatchViewer({ project, patch, number }: { project: string; patch
             <div><strong>{patch.description}</strong><span>Patch {number} · {patch.changes.length} {patch.changes.length === 1 ? 'file' : 'files'} · {new Date(patch.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></div>
             <code>{short(patch.after)}</code><ChevronDown size={14}/>
         </summary>
-        {requested && <PatchContents project={project} patch={patch}/>}
+        {requested && <PatchContents key={patchReviewKey(project, patch)} project={project} patch={patch}/>}
     </details>;
 }
 
 function PatchContents({ project, patch }: { project: string; patch: Patch }) {
     const [view, setView] = useState<View>('split');
+    const [review] = useState(() => new PatchReview(patchReviewKey(project, patch), () => window.localStorage));
+    const viewedPaths = useSyncExternalStore(review.subscribe, review.snapshot, review.serverSnapshot);
+    const viewedFiles = new Set(viewedPaths);
+    const viewedCount = patch.changes.filter(change => viewedFiles.has(change.path)).length;
     const before = useRepositoryFiles(project, patch.before);
     const after = useRepositoryFiles(project, patch.after);
     const ready = before.status === 'ready' && after.status === 'ready';
@@ -33,6 +38,7 @@ function PatchContents({ project, patch }: { project: string; patch: Patch }) {
     return <div className={styles.contents}>
         <div className={styles.toolbar}>
             <div className={styles.revisions}><span>Before <code>{short(patch.before)}</code></span><span>After <code>{short(patch.after)}</code></span></div>
+            <span className={styles.reviewProgress} role="status" title="Saved in this browser">{viewedCount} of {patch.changes.length} files viewed</span>
             <div className={styles.viewToggle} role="group" aria-label="Diff view">
                 <button type="button" aria-pressed={view === 'unified'} onClick={() => setView('unified')}>Unified</button>
                 <button type="button" aria-pressed={view === 'split'} onClick={() => setView('split')}>Side by side</button>
@@ -40,11 +46,14 @@ function PatchContents({ project, patch }: { project: string; patch: Patch }) {
         </div>
         {error ? <div className={styles.message} role="alert"><p>Unable to load this patch: {error}</p><button type="button" onClick={() => { void before.reload(); void after.reload(); }}>Retry</button></div>
             : !ready ? <p className={styles.message} role="status">Loading patch revisions…</p>
-            : patch.changes.map(change => <PatchFile key={change.path} change={change} before={before.files} after={after.files} view={view}/>)}
+            : patch.changes.map(change => <PatchFile key={change.path} change={change} before={before.files} after={after.files} view={view} viewed={viewedFiles.has(change.path)} onViewedChange={value => review.setViewed(change.path, value)}/>)}
     </div>;
 }
 
-function PatchFile({ change, before, after, view }: { change: Patch['changes'][number]; before: Files; after: Files; view: View }) {
+function PatchFile({ change, before, after, view, viewed, onViewedChange }: { change: Patch['changes'][number]; before: Files; after: Files; view: View; viewed: boolean; onViewedChange: (value: boolean) => void }) {
+    const diffId = useId();
+    const [expandedChoice, setExpandedChoice] = useState<boolean | null>(null);
+    const expanded = expandedChoice ?? !viewed;
     const oldText = Object.hasOwn(before, change.path) ? before[change.path] : undefined;
     const newText = Object.hasOwn(after, change.path) ? after[change.path] : undefined;
     const sections = useMemo(() => patchSections(oldText ?? '', newText ?? '', change.hunks), [oldText, newText, change.hunks]);
@@ -57,9 +66,14 @@ function PatchFile({ change, before, after, view }: { change: Patch['changes'][n
         const tokens = (side === 'before' ? oldSyntax : newSyntax).lines[(number ?? 1) - 1];
         return <code>{tokens ? <SyntaxLine tokens={tokens}/> : line.text || ' '}</code>;
     };
-    return <section className={styles.file} aria-label={`Changes to ${change.path}`}>
-        <div className={styles.fileHeading}><strong>{change.path}</strong><span>{patchFileStatus(oldText, newText)}</span><span className={styles.addedCount}>+{additions}</span><span className={styles.removedCount}>−{removals}</span></div>
-        {sections.some(section => section.lines.length) ? <div className={styles.scroll} tabIndex={0} role="region" aria-label={`${change.path} ${view === 'split' ? 'side by side' : 'unified'} diff`}>
+    return <section className={`${styles.file} ${viewed ? styles.fileViewed : ''}`} aria-label={`Changes to ${change.path}`}>
+        <div className={styles.fileHeading}>
+            <button type="button" className={styles.fileToggle} aria-expanded={expanded} aria-controls={diffId} aria-label={`${expanded ? 'Collapse' : 'Expand'} ${change.path}`} onClick={() => setExpandedChoice(!expanded)}><ChevronDown size={15} aria-hidden="true"/><strong>{change.path}</strong></button>
+            <span>{patchFileStatus(oldText, newText)}</span><span className={styles.addedCount}>+{additions}</span><span className={styles.removedCount}>−{removals}</span>
+            <label className={styles.viewedLabel}><input type="checkbox" checked={viewed} aria-label={`Mark ${change.path} as viewed`} onChange={event => { const checked = event.target.checked; onViewedChange(checked); setExpandedChoice(!checked); }}/><span>Viewed</span></label>
+        </div>
+        <div id={diffId} hidden={!expanded}>
+        {expanded && <>{sections.some(section => section.lines.length) ? <div className={styles.scroll} tabIndex={0} role="region" aria-label={`${change.path} ${view === 'split' ? 'side by side' : 'unified'} diff`}>
             <table className={`${styles.diff} ${view === 'split' ? styles.split : styles.unified}`}>
                 <caption className={styles.srOnly}>{change.path}: {view === 'split' ? 'before and after' : 'unified'} changes. Minus marks removed lines and plus marks added lines.</caption>
                 <colgroup>{view === 'split' ? <><col className={styles.numberColumn}/><col/><col className={styles.numberColumn}/><col/></> : <><col className={styles.numberColumn}/><col className={styles.numberColumn}/><col/></>}</colgroup>
@@ -76,5 +90,7 @@ function PatchFile({ change, before, after, view }: { change: Patch['changes'][n
             </table>
         </div> : <p className={styles.message}>{oldText === undefined ? 'Empty file added.' : newText === undefined ? 'Empty file deleted.' : 'No visible line changes.'}</p>}
         {oldText !== undefined && newText !== undefined && oldText.endsWith('\n') !== newText.endsWith('\n') && <p className={styles.fileNote}>{newText.endsWith('\n') ? 'Final newline added.' : 'Final newline removed.'}</p>}
+        </>}
+        </div>
     </section>;
 }
