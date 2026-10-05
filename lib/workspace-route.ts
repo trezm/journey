@@ -1,4 +1,4 @@
-export type WorkspaceTab = 'changesets' | 'code' | 'locks' | 'inbox' | 'review' | 'agents' | 'recording';
+export type WorkspaceTab = 'changesets' | 'code' | 'live' | 'locks' | 'inbox' | 'review' | 'agents' | 'recording';
 export type WorkspaceRoute = {
     project: string;
     journey: string;
@@ -8,7 +8,7 @@ export type WorkspaceRoute = {
     settings?: boolean;
 };
 export const homeRoute: WorkspaceRoute = { project: '', journey: '', tab: 'code', mode: 'repository', path: '' };
-const tabs: readonly string[] = ['changesets', 'code', 'locks', 'inbox', 'review', 'agents', 'recording'];
+const tabs: readonly string[] = ['changesets', 'code', 'live', 'locks', 'inbox', 'review', 'agents', 'recording'];
 
 /** Route IDs are opaque, encoded path segments; file names belong in the query. */
 export function parseWorkspaceRoute(href: string): WorkspaceRoute | null {

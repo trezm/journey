@@ -125,8 +125,9 @@ function renderCodeWorkspace(options = {}) {
         if (name === 'react') return { ...React, useState: value => { const at = index++; return [at < initial.length ? initial[at] : value, next => options.onState?.(at, next)]; }, useEffect: (effect, dependencies) => options.onEffect?.(effect, dependencies), useCallback: callback => callback };
         if (name === '@/hooks/use-repository') return {
             useRepository: () => ({ state, setState: options.setRepositoryState ?? (() => {}), reload: options.reload ?? (async () => {}), status: 'ready', error: '' }),
-            useRepositoryFiles: () => ({ key: 'repo:main', status: 'ready', error: '', files: { 'README.md': 'Imported repository code' }, reload: async () => {} }),
+            useRepositoryFiles: (project, revision) => { options.onFiles?.(project, revision); return ({ key: 'repo:main', status: 'ready', error: '', files: { 'README.md': 'Imported repository code' }, reload: async () => {} }); },
         };
+        if (name === '@/components/live-lock-map') return { LiveLockMap: props => React.createElement('section', { 'aria-label': 'Live repository map', 'data-project': props.project }) };
         if (name === '@/components/journey-sidebar') return { JourneySidebar: () => null };
         if (name === '@/components/git-sync-warning') return { GitSyncWarning: () => null };
         if (name === '@/components/cli-install') return { CliInstall: () => null };
@@ -237,4 +238,13 @@ test('direct journey links initialize editing state after metadata arrives witho
     updates.length = 0;
     renderCodeWorkspace({ ...options, journeys: [{ ...journey, changesets: [{ id: 'another-changeset' }] }] });
     assert.equal(updates.length, 0, 'background refresh preserves a user-selected changeset');
+});
+
+
+test('the live map is available without a journey and does not request full file contents', () => {
+    const requests = [];
+    const html = renderCodeWorkspace({ tab: 'live', onFiles: (project, revision) => requests.push({ project, revision }) });
+    assert.match(html, /aria-label="Live repository map" data-project="repo"/);
+    assert.doesNotMatch(html, /One feature\. One journey\./);
+    assert.equal(requests[0].project, '', 'disable content fetching while the compact live snapshot is displayed');
 });

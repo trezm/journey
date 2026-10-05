@@ -43,7 +43,7 @@ function hookFor(host) {
 
 test('repository, journey views and file names round-trip through shareable URLs', () => {
     const project = 'repo / % café', journey = 'journey #42';
-    for (const tab of ['changesets', 'code', 'locks', 'inbox', 'review', 'agents', 'recording']) {
+    for (const tab of ['changesets', 'code', 'live', 'locks', 'inbox', 'review', 'agents', 'recording']) {
         const route = { project, journey, tab, mode: 'journey', path: tab === 'code' ? 'src/a #?%+名.ts' : '' };
         assert.deepEqual(parseWorkspaceRoute(workspaceHref(route)), route);
     }
@@ -124,7 +124,7 @@ test('the actual server route renders direct repository and journey URLs and rej
         '@/app/page': { default: Workspace, __esModule: true }, '@/app/settings/page': { default: RepositorySettings, __esModule: true },
         '@/lib/workspace-route': routes,
     }).default;
-    for (const view of [[], ['code'], ['journeys', 'j'], ['journeys', 'j', 'review']]) assert.equal((await page({ params: Promise.resolve({ project: 'repo', view }) })).type, Workspace);
+    for (const view of [[], ['code'], ['live'], ['journeys', 'j'], ['journeys', 'j', 'review']]) assert.equal((await page({ params: Promise.resolve({ project: 'repo', view }) })).type, Workspace);
     assert.equal((await page({ params: Promise.resolve({ project: 'repo', view: ['settings'] }) })).type, RepositorySettings);
     await assert.rejects(page({ params: Promise.resolve({ project: 'repo', view: ['unknown'] }) }), /404/);
 });
@@ -163,4 +163,18 @@ test('settings hydration never exposes a Back link to the default repository', (
     assert.match(html, /<span[^>]*aria-disabled="true"[^>]*>Back to workspace<\/span>/);
     assert.doesNotMatch(html, /<a[^>]*>Back to workspace<\/a>/);
     assert.match(html, /<a href="\/"[^>]*><span><\/span>Journey<\/a>/, 'the deliberate brand Home link stays available');
+});
+
+
+test('repository live map links load without a journey and survive Back navigation', () => {
+    const route = { ...homeRoute, project: 'r', tab: 'live' };
+    assert.equal(workspaceHref(route), '/repositories/r/live');
+    assert.deepEqual(parseWorkspaceRoute(workspaceHref(route)), route);
+    const host = browser('/repositories/r/live'), navigation = new WorkspaceNavigation(host);
+    navigation.navigate({ tab: 'code', path: 'src/worker.ts' });
+    host.back();
+    assert.equal(navigation.read().tab, 'live');
+    assert.equal(navigation.read().journey, '');
+    host.forward();
+    assert.equal(navigation.read().path, 'src/worker.ts');
 });
