@@ -30,3 +30,5 @@ export function lockGraph(files: LiveFile[], changesets: LiveChangeset[]) {
         edges,
     };
 }
+
+export { radialLockLayout, graphSpoke } from './lock-graph-layout.ts';

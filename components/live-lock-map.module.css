@@ -50,8 +50,7 @@
 .pager button { padding: 5px; }
 .graphToolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; font-size: 12px; color: #65758d; padding: 10px 20px; background: #f8fafc; border-top: 1px solid #e9eef5; }
 .graphViewport { overflow: auto; max-height: 660px; background-color: #f8fafc; background-image: radial-gradient(#c3cfdf80 .75px, transparent .75px); background-size: 14px 14px; }
-.graph { display: block; }
-.graphHeading { font-size: 11px; font-weight: 600; fill: #61718a; letter-spacing: 1px; }
+.graph { display: block; margin-inline: auto; }
 .edge { fill: none; stroke: #a6b6ca; stroke-width: 1.4; opacity: .6; }
 .conflictEdge { stroke: #d54e59; }
 .edgePulse { fill: none; stroke: #3785df; stroke-width: 2.5; stroke-linecap: round; stroke-dasharray: 3 97; opacity: .8; pointer-events: none; animation: pulseTravel 4s linear infinite; }
@@ -59,6 +58,7 @@
 .selectedEdge { stroke-width: 3; opacity: 1; }
 .graphNode { cursor: pointer; }
 .graphNode rect { fill: #fff; stroke: #ced9e6; stroke-width: 1; }
+.changesetNode rect { fill: #eef5ff; stroke: #8eaacb; stroke-width: 1.5; }
 .graphNode text { fill: #344760; font-size: 12px; font-weight: 550; pointer-events: none; }
 .graphNode .nodeDetail { fill: #64758e; font-size: 11px; font-weight: 400; }
 .conflictNode rect { stroke: #d98790; }

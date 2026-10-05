@@ -3,7 +3,7 @@ import { useId, useMemo, useRef, useState } from 'react';
 import { Activity, ArrowRight, ChevronLeft, ChevronRight, FileCode2, GitBranch, List, LockKeyhole, Minus, Network, Pause, Play, Plus, RefreshCw, Search, X } from 'lucide-react';
 import { useLiveLockMap } from '@/hooks/use-live-lock-map';
 import type { LiveChangeset, LiveFile, LiveRegion } from '@/lib/avc/live';
-import { compareLiveFiles, lockGraph } from '@/lib/live-map';
+import { compareLiveFiles, lockGraph, radialLockLayout, graphSpoke } from '@/lib/live-map';
 import { homeRoute, workspaceHref } from '@/lib/workspace-route';
 import styles from './live-lock-map.module.css';
 
@@ -23,10 +23,8 @@ function Pager({ page, count, onChange }: { page: number; count: number; onChang
 function LockGraph({ files, changesets, selection, onSelect }: { files: LiveFile[]; changesets: LiveChangeset[]; selection: Selection; onSelect: (selection: Selection) => void }) {
     const [zoom, setZoom] = useState(1);
     const graph = useMemo(() => lockGraph(files, changesets), [files, changesets]);
-    const height = Math.max(300, Math.max(graph.files.length, graph.changesets.length) * 80 + 80);
-    const position = (index: number, count: number) => 80 + index * (height - 140) / Math.max(1, count - 1);
-    const fileY = new Map(graph.files.map((file, index) => [file.path, position(index, graph.files.length)]));
-    const changeY = new Map(graph.changesets.map((change, index) => [change.id, position(index, graph.changesets.length)]));
+    const layout = useMemo(() => radialLockLayout(graph), [graph]);
+    const edgePath = (edge: typeof graph.edges[number]) => graphSpoke(layout.changesets.get(edge.changeset)!, layout.files.get(edge.file)!);
     const selectedEdge = (edge: typeof graph.edges[number]) => edge.file === selection.file || edge.changeset === selection.changeset;
     const activate = (event: React.KeyboardEvent<SVGGElement>, next: Selection) => {
         if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect(next); }
@@ -35,27 +33,28 @@ function LockGraph({ files, changesets, selection, onSelect }: { files: LiveFile
     return <>
         <div className={styles.graphToolbar}><span>{graph.changesets.length} open changesets · {graph.files.length} locked files on this page</span><div className={styles.controls}><button aria-label="Zoom out" disabled={zoom <= .5} onClick={() => setZoom(value => Math.max(.5, value - .25))}><Minus size={14}/></button><button aria-label="Reset graph zoom" onClick={() => setZoom(1)}>{Math.round(zoom * 100)}%</button><button aria-label="Zoom in" disabled={zoom >= 1.5} onClick={() => setZoom(value => Math.min(1.5, value + .25))}><Plus size={14}/></button></div></div>
         <div className={styles.graphViewport} tabIndex={0} aria-label="Lock ownership graph; scroll to explore, use Tab to select nodes">
-            <svg className={styles.graph} width={960 * zoom} height={height * zoom} viewBox={`0 0 960 ${height}`} role="group" aria-label="Open changesets and the files they hold">
-                <text className={styles.graphHeading} x="28" y="27">OPEN CHANGESETS</text><text className={styles.graphHeading} x="610" y="27">LOCKED FILES</text>
-                {[...graph.edges].sort((a, b) => Number(selectedEdge(a)) - Number(selectedEdge(b))).map(edge => <path key={`${edge.changeset}:${edge.file}`} data-map-edge={`${edge.changeset}:${edge.file}`} d={`M 350 ${changeY.get(edge.changeset)} C 455 ${changeY.get(edge.changeset)}, 505 ${fileY.get(edge.file)}, 610 ${fileY.get(edge.file)}`} className={`${styles.edge} ${edge.conflictCount ? styles.conflictEdge : ''} ${selectedEdge(edge) ? styles.selectedEdge : ''}`}><title>{`${edge.lockCount} held ${edge.lockCount === 1 ? 'lock' : 'locks'}${edge.conflictCount ? `, ${edge.conflictCount} conflicting` : ''}`}</title></path>)}
-                {graph.edges.slice(0, 60).map((edge, index) => <path key={`pulse:${edge.changeset}:${edge.file}`} aria-hidden="true" className={styles.edgePulse} pathLength="100" style={{ animationDelay: `${index % 7 * -.6}s` }} d={`M 350 ${changeY.get(edge.changeset)} C 455 ${changeY.get(edge.changeset)}, 505 ${fileY.get(edge.file)}, 610 ${fileY.get(edge.file)}`}/>)}
+            <svg className={styles.graph} width={layout.width * zoom} height={layout.height * zoom} style={{ width: `${zoom * 100}%`, minWidth: Math.max(Math.min(960, layout.width), layout.width * .8) * zoom, maxWidth: layout.width * zoom, height: 'auto' }} viewBox={`0 0 ${layout.width} ${layout.height}`} role="group" aria-label="Open changesets and the files they hold">
+                {[...graph.edges].sort((a, b) => Number(selectedEdge(a)) - Number(selectedEdge(b))).map(edge => <path key={`${edge.changeset}:${edge.file}`} data-map-edge={`${edge.changeset}:${edge.file}`} d={edgePath(edge)} className={`${styles.edge} ${edge.conflictCount ? styles.conflictEdge : ''} ${selectedEdge(edge) ? styles.selectedEdge : ''}`}><title>{`${edge.lockCount} held ${edge.lockCount === 1 ? 'lock' : 'locks'}${edge.conflictCount ? `, ${edge.conflictCount} conflicting` : ''}`}</title></path>)}
+                {graph.edges.slice(0, 60).map((edge, index) => <path key={`pulse:${edge.changeset}:${edge.file}`} aria-hidden="true" className={styles.edgePulse} pathLength="100" style={{ animationDelay: `${index % 7 * -.6}s` }} d={edgePath(edge)}/>)}
                 {graph.changesets.map(change => {
                     const selected = selection.changeset === change.id;
+                    const card = layout.changesets.get(change.id)!;
                     const related = graph.edges.some(edge => edge.changeset === change.id && edge.file === selection.file);
-                    return <g key={change.id} data-map-changeset={change.id} className={`${styles.graphNode} ${selected || related ? styles.selectedNode : ''}`} transform={`translate(28 ${changeY.get(change.id)! - 28})`} role="button" tabIndex={0} aria-pressed={selected} aria-label={`${change.description}, ${change.title}, ${change.lockCount} held locks`} onClick={() => onSelect({ changeset: change.id })} onKeyDown={event => activate(event, { changeset: change.id })}>
-                        <title>{`${change.description} · ${change.title} · ${change.status} · ${change.lockCount} held locks`}</title><rect width="322" height="56" rx="8"/><text x="14" y="22">{short(change.description)}</text><text className={styles.nodeDetail} x="14" y="42">{short(change.title, 30)} · {change.status === 'review' ? 'Review' : 'Working'}</text>
+                    return <g key={change.id} data-map-changeset={change.id} className={`${styles.graphNode} ${styles.changesetNode} ${selected || related ? styles.selectedNode : ''}`} transform={`translate(${card.x - card.width / 2} ${card.y - card.height / 2})`} role="button" tabIndex={0} aria-pressed={selected} aria-label={`${change.description}, ${change.title}, ${change.lockCount} held locks`} onClick={() => onSelect({ changeset: change.id })} onKeyDown={event => activate(event, { changeset: change.id })}>
+                        <title>{`${change.description} · ${change.title} · ${change.status} · ${change.lockCount} held locks`}</title><rect width={card.width} height={card.height} rx="8"/><text x="14" y="22">{short(change.description, 31)}</text><text className={styles.nodeDetail} x="14" y="42">{short(change.title, 22)} · {change.status === 'review' ? 'Review' : 'Working'}</text>
                     </g>;
                 })}
                 {graph.files.map(file => {
                     const selected = selection.file === file.path;
+                    const card = layout.files.get(file.path)!;
                     const related = graph.edges.some(edge => edge.file === file.path && edge.changeset === selection.changeset);
-                    return <g key={file.path} data-map-file={file.path} className={`${styles.graphNode} ${file.conflictCount ? styles.conflictNode : ''} ${selected || related ? styles.selectedNode : ''}`} transform={`translate(610 ${fileY.get(file.path)! - 28})`} role="button" tabIndex={0} aria-pressed={selected} aria-label={`${file.path}, ${file.lockCount} held locks, ${file.conflictCount} conflicting locks`} onClick={() => onSelect({ file: file.path })} onKeyDown={event => activate(event, { file: file.path })}>
-                        <title>{`${file.path} · ${file.lockCount} held locks · ${file.conflictCount} conflicting locks`}</title><rect width="322" height="56" rx="8"/><text x="14" y="22">{short(file.path)}</text><text className={styles.nodeDetail} x="14" y="42">{file.lockCount} held · {file.conflictCount} conflicting · {file.waitingCount} waiting</text>
+                    return <g key={file.path} data-map-file={file.path} className={`${styles.graphNode} ${file.conflictCount ? styles.conflictNode : ''} ${selected || related ? styles.selectedNode : ''}`} transform={`translate(${card.x - card.width / 2} ${card.y - card.height / 2})`} role="button" tabIndex={0} aria-pressed={selected} aria-label={`${file.path}, ${file.lockCount} held locks, ${file.conflictCount} conflicting locks`} onClick={() => onSelect({ file: file.path })} onKeyDown={event => activate(event, { file: file.path })}>
+                        <title>{`${file.path} · ${file.lockCount} held locks · ${file.conflictCount} conflicting locks`}</title><rect width={card.width} height={card.height} rx="8"/><text x="14" y="22">{short(file.path, 32)}</text><text className={styles.nodeDetail} x="14" y="42">{file.lockCount} held · {file.conflictCount} conflicting · {file.waitingCount} waiting</text>
                     </g>;
                 })}
             </svg>
         </div>
-        <p className={styles.graphNote}>Connections show held locks only. Select a node to highlight its connections; use Tab and Enter with a keyboard. Scroll to explore the graph.</p>
+        <p className={styles.graphNote}>Changesets sit in the center, with locked files around them. Connections show held locks only. Select a node to highlight its connections; use Tab and Enter with a keyboard. Scroll to explore the graph.</p>
     </>;
 }
 
