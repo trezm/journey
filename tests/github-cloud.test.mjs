@@ -184,7 +184,7 @@ test('workerd background sync decrypts repository credentials and observes equal
         d1Databases: { DB: 'runtime-db' }, r2Buckets: ['BUCKET'], outboundService });
     try {
         const db = await runtime.getD1Database('DB');
-        await db.prepare('CREATE TABLE projects(id TEXT PRIMARY KEY,owner TEXT NOT NULL,name TEXT NOT NULL,version INTEGER NOT NULL,state TEXT NOT NULL)').run();
+        await db.prepare("CREATE TABLE projects(id TEXT PRIMARY KEY,owner TEXT NOT NULL,name TEXT NOT NULL,visibility TEXT NOT NULL DEFAULT 'private',version INTEGER NOT NULL,state TEXT NOT NULL)").run();
         const setup = await runtime.dispatchFetch('https://worker.test/setup'); assert.equal(setup.status, 200);
         const initial = await setup.json(); head = initial.head;
         const bucket = await runtime.getR2Bucket('BUCKET');

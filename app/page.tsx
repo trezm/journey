@@ -5,6 +5,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { GitBranch, Layers, LockKeyhole, MessageSquare, Terminal, Plus, Check, Clock, GitCommitHorizontal, ChevronDown, FileCode2, Inbox, RefreshCw, CheckCircle2, ShieldCheck, Copy, FolderGit2, Activity, LogOut, AlertTriangle, PanelLeftClose, Code2, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { CliInstall } from '@/components/cli-install';
+import { AccountAuth } from '@/components/account-auth';
+import { PublicRepository } from '@/components/public-repository';
+import type { RepositorySummary, Visibility } from '@/lib/avc/repository-visibility';
 import { RepositoryPicker } from '@/components/repository-picker';
 import { PatchViewer } from '@/components/patch-viewer';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
@@ -33,17 +36,16 @@ async function jsonFetch(url: string, init?: RequestInit) { const r = await fetc
     throw new Error(data.error ?? 'Request failed'); return data; }
 export default function Workspace() {
     const { project, selected, tab, modeChoice, pathChoice, setProject, setSelected, setTab, setModeChoice, setPathChoice, hrefFor, followLink } = useWorkspaceRoute();
-    const [user, setUser] = useState<User | null>(null), [loading, setLoading] = useState(true), [projects, setProjects] = useState<{
-        id: string;
-        name: string;
-    }[]>([]), [draft, setDraft] = useState({ revision: '', path: '', content: '' }), [busy, setBusy] = useState(false), [error, setError] = useState(''), [notice, setNotice] = useState(''), [modal, setModal] = useState(''), [title, setTitle] = useState(''), [description, setDescription] = useState(''), [changeset, setChangeset] = useState(''), [start, setStart] = useState(1), [end, setEnd] = useState(1), [whole, setWhole] = useState(false), [manifest, setManifest] = useState<BreakingChange[]>([]), [target, setTarget] = useState(''), [before, setBefore] = useState(''), [after, setAfter] = useState(''), [migration, setMigration] = useState(''), [review, setReview] = useState(''), [reviewAnchor, setReviewAnchor] = useState(''), [dispositions, setDispositions] = useState<Record<number, string>>({}), [credential, setCredential] = useState(''), [email, setEmail] = useState(''), [password, setPassword] = useState(''), [register, setRegister] = useState(false), [now, setNow] = useState(Date.now()), [demo, setDemo] = useState(false);
+    const [user, setUser] = useState<User | null>(null), [loading, setLoading] = useState(true), [projects, setProjects] = useState<RepositorySummary[]>([]), [draft, setDraft] = useState({ revision: '', path: '', content: '' }), [busy, setBusy] = useState(false), [error, setError] = useState(''), [notice, setNotice] = useState(''), [modal, setModal] = useState(''), [title, setTitle] = useState(''), [description, setDescription] = useState(''), [changeset, setChangeset] = useState(''), [start, setStart] = useState(1), [end, setEnd] = useState(1), [whole, setWhole] = useState(false), [manifest, setManifest] = useState<BreakingChange[]>([]), [target, setTarget] = useState(''), [before, setBefore] = useState(''), [after, setAfter] = useState(''), [migration, setMigration] = useState(''), [review, setReview] = useState(''), [reviewAnchor, setReviewAnchor] = useState(''), [dispositions, setDispositions] = useState<Record<number, string>>({}), [credential, setCredential] = useState(''), [now, setNow] = useState(Date.now()), [demo, setDemo] = useState(false);
+    const [showAuth, setShowAuth] = useState(false), [newVisibility, setNewVisibility] = useState<Visibility>('private');
     const [authMode, setAuthMode] = useState<'password' | 'access'>('password');
-    const { state, setState, reload, status: repositoryStatus, error: repositoryError } = useRepository(project);
+    const { state, repository, setState, reload, status: repositoryStatus, error: repositoryError } = useRepository(project);
+    const canWrite = !!repository?.permissions.write;
     const syncPaused = !!state?.sync?.run;
     const journey = state?.journeys.find(j => j.id === selected);
     const codeMode = modeChoice.project === project && journey ? modeChoice.mode : 'repository';
     const revision = codeRevision(state, journey, codeMode);
-    const snapshot = useRepositoryFiles(tab === 'live' ? '' : project, revision);
+    const snapshot = useRepositoryFiles(tab === 'live' || !canWrite ? '' : project, revision);
     const files = snapshot.files;
     const path = codePath(files, pathChoice.project === project ? pathChoice.path : '');
     const setPath = (value: string) => setPathChoice({ project, path: value });
@@ -56,11 +58,11 @@ export default function Workspace() {
     const renewableLeases = leases.filter(l => !l.retained);
     const events = state?.events.filter(e => e.targets.includes(selected) || e.journey === selected) ?? [];
     const pending = state?.events.filter(e => isCanonicalUpdate(e) && e.id > (journey?.reconciledCursor ?? 0) && e.journey !== selected) ?? [];
-    const loadProjects = useCallback(async () => { const a = await jsonFetch('/api/auth'); setAuthMode(a.mode === 'access' ? 'access' : 'password'); setUser(a.user); if (a.user) {
+    const loadProjects = useCallback(async () => { const a = await jsonFetch('/api/auth'); setAuthMode(a.mode === 'access' ? 'access' : 'password'); setUser(a.user);
         const d = await jsonFetch('/api/avc');
         setProjects(d.projects);
-        setProject(p => p || repositorySelection(d.projects, '', null));
-    } setLoading(false); }, []);
+        if (a.user) setProject(p => p || repositorySelection(d.projects, '', null));
+        setLoading(false); }, []);
     useEffect(() => { loadProjects().catch(e => { setError(e.message); setLoading(false); }); }, [loadProjects]);
     useEffect(() => { if (repositoryError) setError(repositoryError); }, [repositoryError]);
     useEffect(() => { setError(''); setNotice(''); setCredential(''); setModal(''); }, [project]);
@@ -71,6 +73,7 @@ export default function Workspace() {
     useEffect(() => { setStart(1); setEnd(Math.max(1, (files[path] ?? '').split('\n').length)); }, [files, path]);
     useEffect(() => { setChangeset(journey?.changesets[0]?.id ?? ''); setManifest(journey?.manifest ?? []); setDispositions({}); }, [selected, journey?.id]);
     async function act(action: string, data: Record<string, unknown> = {}, toast?: string) { setBusy(true); setError(''); try {
+        if (action !== 'create_project' && !canWrite) throw new Error('Only the repository owner can change this repository.');
         const body = action === 'integrate' ? integrationRequests.current.body(project, selected, data) : JSON.stringify({ action, project: project || undefined, journey: selected || undefined, requestId: crypto.randomUUID(), ...data });
         const d = await requestJson('/api/avc', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
         if (action === 'integrate') integrationRequests.current.settle(project, selected);
@@ -96,21 +99,10 @@ export default function Workspace() {
     } }
     const integrationRequests = useRef(new PendingIntegrationRequests());
     const integrationBlocked = syncPaused ? 'Repository writes are paused for Git sync. Complete synchronization or resolve the conflict above before integrating.' : journey ? integrationReviewBlocker(journey, true, state?.allowCoordinatorApproval ?? false) ?? (!leases.length ? 'Acquire valid locks before integrating. Posted locks remain held until integration or abandonment.' : null) : 'Select a journey first.';
-    function open(name: string) { setTitle(''); setDescription(''); setError(''); setModal(name); if (name === 'project') setDemo(false); if (name === 'manifest')
+    function open(name: string) { setTitle(''); setDescription(''); setError(''); setModal(name); if (name === 'project') { setDemo(false); setNewVisibility('private'); } if (name === 'manifest')
         setManifest(journey?.manifest ?? []); }
     const tokens = () => leases.map(l => l.token);
-    async function authenticate(e: React.FormEvent) { e.preventDefault(); setBusy(true); setError(''); try {
-        await jsonFetch('/api/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: register ? 'register' : 'login', email, password }) });
-        setPassword('');
-        await loadProjects();
-    }
-    catch (e) {
-        setError((e as Error).message);
-    }
-    finally {
-        setBusy(false);
-    } }
-    async function createProject() { const d = await run('create_project', { name: title || 'my-repository', empty: !demo }); if (d) {
+    async function createProject() { const d = await run('create_project', { name: title || 'my-repository', empty: !demo, visibility: newVisibility }); if (d) {
         await loadProjects();
         setProject(d.project);
         setTab('agents');
@@ -173,26 +165,30 @@ export default function Workspace() {
                     description: string;
                 }) => { if (!input?.title || !input.description)
                     throw new Error('Title and description required.'); const d = await act('create_journey', input); setSelected(d.journey); return d; } }
-        ]) {
+        ].filter(tool => tool.annotations.readOnlyHint || canWrite)) {
             try {
                 void Promise.resolve(context.registerTool(tool, { signal: lifecycle.signal })).catch(() => { });
             }
             catch { }
         }
         return () => lifecycle.abort();
-    }, [project, selected]);
+    }, [project, selected, canWrite]);
     if (loading)
         return <div className="boot"><GitBranch size={34}/><span>Opening workspace…</span></div>;
-    if (!user && authMode === 'access')
-        return <main className="auth"><div className="auth-card"><div className="wordmark"><span className="brand-icon"><GitBranch /></span>Journey</div><h1>Open your workspace.</h1><p>Sign in through Cloudflare Access with your approved account.</p>{error && <p className="error" role="alert">{error}</p>}<a className="sign-in" href="/">Try again</a><a className="sign-in" href="/cdn-cgi/access/logout">Sign in with another account</a></div></main>;
-    if (!user)
-        return <main className="auth"><div className="auth-card"><div className="wordmark"><span className="brand-icon"><GitBranch /></span>Journey<span className="version">EARLY ACCESS</span></div><h1>Open your workspace.</h1><p>Coordinate changes. Preserve the journey.</p><form onSubmit={authenticate}><label>Email<input type="email" required value={email} onChange={e => setEmail(e.target.value)} autoComplete="email"/></label><label>Password<input type="password" required minLength={12} value={password} onChange={e => setPassword(e.target.value)} autoComplete={register ? 'new-password' : 'current-password'}/></label><p className="small">Use at least 12 characters.</p>{error && <p className="error" role="alert">{error}</p>}<Button type="submit" disabled={busy}>{register ? 'Create account' : 'Sign in'}</Button></form><button className="text-button" onClick={() => setRegister(!register)}>{register ? 'Already have an account? Sign in' : 'Create an account'}</button><a className="sign-in" href="/signin-with-chatgpt?return_to=/" target="_top">Sign in with ChatGPT</a></div></main>;
+    if (!user && (showAuth || !project)) {
+        if (authMode === 'access') return <main className="auth"><div className="auth-card"><div className="wordmark"><GitBranch />Journey</div><h1>Open your workspace.</h1><p>Sign in through Cloudflare Access with your approved account.</p><a className="sign-in" href="/cdn-cgi/access/logout">Sign in with another account</a>{projects.map(item => <a className="sign-in" key={item.id} href={`/repositories/${item.id}/code`}>{item.owner.username} / {item.name} · Public</a>)}</div></main>;
+        if (showAuth || !projects.length) return <><AccountAuth initialError={error} onAuthenticated={async () => { await loadProjects(); await reload(); setShowAuth(false); }}/>{projects.length > 0 && <Button style={{ position: 'absolute', top: 20, right: 20 }} variant="outline" onClick={() => { setShowAuth(false); setProject(''); }}>Browse public repositories</Button>}</>;
+        return <main className="auth"><section className="auth-card"><div className="wordmark"><GitBranch />Journey</div><h1>Public repositories</h1><p>Explore accepted code and history from personal repositories.</p><Button onClick={() => setShowAuth(true)}>Sign in or create account</Button>{projects.map(item => <a className="sign-in" style={{ marginTop: 18 }} key={item.id} href={`/repositories/${item.id}/code`}>{item.owner.username} / {item.name} · Public</a>)}</section></main>;
+    }
+    if (project && (!repository || !state)) return <main className="workspace"><div className="empty-panel" role={repositoryError ? 'alert' : 'status'}><GitBranch size={32}/><h1>{repositoryError ? 'Repository unavailable' : 'Opening repository…'}</h1><p>{repositoryError || 'Checking repository access.'}</p>{repositoryError && <Button onClick={() => { setProject(''); void loadProjects(); }}>Back to repositories</Button>}{!user && repositoryError && <Button onClick={() => setShowAuth(true)}>Sign in</Button>}</div></main>;
+    if (repository && state && !canWrite) return <PublicRepository key={project} repository={repository} state={state} projects={projects} signedIn={!!user} onSignIn={() => setShowAuth(true)} onProject={id => { setProject(id); setSelected(''); }}/>;
+    if (!user) return null;
     const projectName = projects.find(p => p.id === project)?.name ?? state?.name ?? 'Repository';
     const count = (s: string) => state?.journeys.filter(j => j.status === s).length ?? 0;
     const apiExample = `export AVC_URL="${typeof window !== 'undefined' ? window.location.origin : ''}"\nexport AVC_PROJECT="${project}"\nexport AVC_TOKEN="<agent-token>"\n\ncurl "$AVC_URL/api/avc?project=$AVC_PROJECT" \\\n  -H "Authorization: Bearer $AVC_TOKEN"`;
     return <div className="app-shell">
- <aside className="sidebar"><div className="wordmark"><span className="brand-icon"><GitBranch size={21}/></span>Journey</div><div className="workspace-label">VERSION CONTROL</div><RepositoryPicker projects={projects} value={project} onValueChange={value => { setProject(value); setSelected(''); }}/><button className="sidebar-link" onClick={() => open('project')}><Plus size={16}/>New repository</button><div className="sidebar-divider"/><div className="sidebar-heading">JOURNEYS <button title="New journey" disabled={!project || syncPaused} onClick={() => open('journey')}><Plus size={17}/></button></div><JourneySidebar key={project} journeys={state?.journeys ?? []} selected={selected} hrefForJourney={id => hrefFor({ journey: id, tab: 'changesets', mode: 'journey', path: '' })} onNavigateJourney={(event, id) => followLink(event, { journey: id, tab: 'changesets', mode: 'journey', path: '' })}/><div className="sidebar-bottom"><button className="sidebar-link" onClick={() => setTab('agents')}><Terminal size={18}/>Connect & import</button><div className="account"><span className="avatar">{user.name.slice(0, 1).toUpperCase()}</span><span><strong>{user.name.includes('@') ? user.name.split('@')[0] : user.name}</strong><small>Workspace owner</small></span><button title="Sign out" onClick={async () => { const result = await jsonFetch('/api/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"action":"logout"}' }); setUser(null); setState(null); setProject(''); if (result.logoutUrl === '/cdn-cgi/access/logout') window.location.assign(result.logoutUrl); }}><LogOut size={16}/></button></div></div></aside>
- <div className="main-shell"><header className="topbar"><div className="breadcrumb"><FolderGit2 size={18}/><a style={{ color: 'inherit', textDecoration: 'none' }} href={hrefFor({ journey: '', tab: 'code', mode: 'repository', path: '' })} onClick={event => followLink(event, { journey: '', tab: 'code', mode: 'repository', path: '' })}>{projectName}</a><span className="slash">/</span><strong>{tab === 'agents' ? 'Connect & import' : tab === 'code' ? 'Code' : tab === 'live' ? 'Live map' : 'Journeys'}</strong></div><div className="topbar-right"><span className="chip mono"><GitBranch size={14}/>main <b>{short(state?.head)}</b></span><span className="chip subtle"><ShieldCheck size={14}/>CI optional</span><Button disabled={!project || busy || syncPaused} onClick={() => open('journey')}><Plus />New journey</Button></div></header>
+ <aside className="sidebar"><div className="wordmark"><span className="brand-icon"><GitBranch size={21}/></span>Journey</div><div className="workspace-label">VERSION CONTROL</div><RepositoryPicker projects={projects} value={project} onValueChange={value => { setProject(value); setSelected(''); }}/><button className="sidebar-link" onClick={() => open('project')}><Plus size={16}/>New repository</button><div className="sidebar-divider"/><div className="sidebar-heading">JOURNEYS <button title="New journey" disabled={!project || syncPaused} onClick={() => open('journey')}><Plus size={17}/></button></div><JourneySidebar key={project} journeys={state?.journeys ?? []} selected={selected} hrefForJourney={id => hrefFor({ journey: id, tab: 'changesets', mode: 'journey', path: '' })} onNavigateJourney={(event, id) => followLink(event, { journey: id, tab: 'changesets', mode: 'journey', path: '' })}/><div className="sidebar-bottom"><button className="sidebar-link" onClick={() => setTab('agents')}><Terminal size={18}/>Connect & import</button><div className="account"><span className="avatar">{user.name.slice(0, 1).toUpperCase()}</span><span><strong>{user.name.includes('@') ? user.name.split('@')[0] : user.name}</strong><small>Personal account</small></span><button title="Sign out" onClick={async () => { const result = await jsonFetch('/api/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"action":"logout"}' }); setUser(null); setState(null); setProject(''); await loadProjects(); if (result.logoutUrl === '/cdn-cgi/access/logout') window.location.assign(result.logoutUrl); }}><LogOut size={16}/></button></div></div></aside>
+ <div className="main-shell"><header className="topbar"><div className="breadcrumb"><FolderGit2 size={18}/><a style={{ color: 'inherit', textDecoration: 'none' }} href={hrefFor({ journey: '', tab: 'code', mode: 'repository', path: '' })} onClick={event => followLink(event, { journey: '', tab: 'code', mode: 'repository', path: '' })}>{projectName}</a><span className="slash">/</span><strong>{tab === 'agents' ? 'Connect & import' : tab === 'code' ? 'Code' : tab === 'live' ? 'Live map' : 'Journeys'}</strong></div><div className="topbar-right"><span className="chip mono"><GitBranch size={14}/>main <b>{short(state?.head)}</b></span><span className="chip subtle">{repository?.visibility ?? 'Private'} · {repository?.owner.username ?? user.name}</span><Button disabled={!project || busy || syncPaused} onClick={() => open('journey')}><Plus />New journey</Button></div></header>
  <main className="workspace"><div className="page-heading"><div><div className="eyebrow">{tab === 'agents' ? 'CONNECT YOUR AGENTS' : 'REPOSITORY WORKSPACE'}</div><h1>{tab === 'agents' ? 'Connect your repository' : tab === 'live' ? 'See the work taking shape.' : tab === 'code' ? projectName : journey?.title ?? 'Your next feature starts here.'}</h1><p>{tab === 'agents' ? 'Import your local Git history, then give Codex a list of tasks.' : tab === 'live' ? 'Follow editing scopes across your repository and see how changesets connect.' : tab === 'code' ? 'Browse the current repository code or open an isolated journey revision.' : journey?.description ?? 'Create a journey, record its steps, then review the complete change.'}</p></div>{journey && tab !== 'agents' && tab !== 'code' && tab !== 'live' && <span className={`status ${journey.status}`}>{journey.status === 'integrated' ? <CheckCircle2 size={15}/> : journey.status === 'review' ? <MessageSquare size={15}/> : <Clock size={15}/>} {statusLabel(journey.status)}</span>}</div>
  {state?.sync && <GitSyncWarning key={`${project}:${state.sync.run?.id ?? 'idle'}`} project={project} sync={state.sync} editable={!user.agent} onRefresh={() => reload()}/> }
  <div className="overview-strip"><div><span>Active journeys</span><strong>{count('working') + count('review')}</strong></div><div><span>Awaiting review</span><strong>{count('review')}</strong></div><div><span>Active locks</span><strong>{state?.leases.filter(l => lockActive(l, now)).length ?? 0}</strong></div><div><span>Accepted journeys</span><strong>{count('integrated')}</strong></div><div className="overview-tail"><Activity size={20}/><span>Whole journeys integrate.<br /><b>Every step stays recorded.</b></span></div></div>
@@ -217,6 +213,7 @@ export default function Workspace() {
  </main><footer className="workspace-footer"><span><GitBranch size={14}/>Journey / Agentic Version Control</span><span>Git revisions · durable inboxes · retained locks</span></footer></div>
  <Dialog open={!!modal} onOpenChange={v => { if (!v)
         setModal(''); }}><DialogContent className="avc-dialog"><DialogTitle>{{ project: 'Create repository', journey: 'Start a journey', changeset: 'Add a changeset', lock: 'Acquire an editing lock', patch: 'Record a patch', manifest: 'Declare breaking changes', agent: 'Create an agent token', reconcile: 'Reconcile accepted journeys', abandon: 'Abandon this journey' }[modal]}</DialogTitle><DialogDescription>{{ project: 'Create an empty destination for your existing Git repository, or start with an optional Rust example.', journey: 'A journey contains the changesets needed for one complete feature.', changeset: 'Describe what this implementation step accomplishes.', lock: journey?.posted ? 'Reserve lines at the current journey revision until integration or abandonment.' : 'Reserve lines for 10 minutes with renewal. Submit for review to hold them until integration or abandonment.', patch: 'Save an immutable patch in the selected changeset. All edits must be covered by its locks.', manifest: 'List compatibility changes, or explicitly declare that there are none.', agent: 'This credential is scoped to the selected repository.', reconcile: 'Inspect each change, adapt your code if needed, and record a disposition.', abandon: 'Release every lock and close the journey. Its recorded work remains available.' }[modal]}</DialogDescription>
+ {modal === 'project' && <label>Visibility<select value={newVisibility} onChange={event => setNewVisibility(event.target.value as Visibility)}><option value="private">Private — only you and your agents</option><option value="public">Public — anyone can read accepted code</option></select><span className="small">Public Git history includes original commit author metadata.</span></label>}
  {modal === 'project' && <label className="checkbox"><input type="checkbox" checked={demo} onChange={e => setDemo(e.target.checked)}/>Start with the Rust example instead of an empty repository</label>}
  {['project', 'journey', 'agent'].includes(modal) && <label>{modal === 'agent' ? 'Agent name' : modal === 'project' ? 'Repository name' : 'Journey title'}<input value={title} onChange={e => setTitle(e.target.value)} placeholder={modal === 'project' ? 'my-repository' : modal === 'agent' ? 'implementation-agent' : 'Add structured lookup errors'}/></label>}
  {['journey', 'changeset', 'patch'].includes(modal) && <label>{modal === 'patch' ? 'What changed?' : 'Description'}<textarea rows={3} value={description} onChange={e => setDescription(e.target.value)} placeholder={modal === 'changeset' ? 'Introduce the lookup error type' : 'Describe the intent and scope.'}/></label>}

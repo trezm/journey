@@ -29,6 +29,13 @@
       "when": 1791167000003,
       "tag": "0003_accounts",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1791171000004,
+      "tag": "0004_repository_visibility",
+      "breakpoints": true
     }
   ]
 }

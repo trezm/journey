@@ -107,7 +107,8 @@ test('real sync routes authorize, validate raw commits, fence racing mutations a
     } });
     const db = { rows: new Map(), agents: new Map(), sessions: new Map(), beforeUpdate: null, prepare(sql) { return { bind(...args) { return {
         async first() {
-            if (sql.startsWith('SELECT id,owner,name,version,state FROM projects')) return structuredClone(db.rows.get(args[0]) ?? null);
+            if (sql.startsWith('SELECT id,owner,name,visibility,version,state FROM projects')) return structuredClone(db.rows.get(args[0]) ?? null);
+            if (sql.startsWith('SELECT username FROM users')) return { username: 'owner' };
             if (sql.startsWith('SELECT owner FROM projects')) return db.rows.has(args[0]) ? { owner: db.rows.get(args[0]).owner } : null;
             if (sql.startsWith('SELECT project,name,role FROM agents')) return db.agents.get(args[0]) ?? null;
             if (sql.startsWith('SELECT sessions.user,users.email')) return db.sessions.get(args[0]) ?? null;
@@ -129,7 +130,7 @@ test('real sync routes authorize, validate raw commits, fence racing mutations a
     const { digest } = await import('../lib/avc/auth.ts'), { decodeState, encodeState } = await import('../lib/avc/state-codec.ts');
     const tokens = { coordinator: 'avc_sync_coordinator', otherCoordinator: 'avc_other_coordinator', worker: 'avc_sync_worker' };
     for (const [name, token] of Object.entries(tokens)) db.agents.set(await digest(token), { project: 'repo', name, role: name === 'worker' ? 'worker' : 'coordinator' });
-    db.sessions.set(await digest('owner-session'), { user: 'owner', email: 'owner@example.test' });
+    db.sessions.set(await digest('owner-session'), { user: 'owner', username: 'owner', email: 'owner@example.test' });
     const headers = who => who === 'owner' ? { Cookie: 'avc_session=owner-session' } : { Authorization: 'Bearer ' + tokens[who] };
     const git = new GitStore(bucket, 'repo'), initial = await git.save({ 'file.txt': 'one\ntwo\nthree', 'stable.txt': 'stable' }, undefined, 'Initial', 'Owner');
     const s = state(initial.oid); s.revisions[initial.oid] = initial.meta;

@@ -161,7 +161,7 @@ test('integration retains all 29 authorization, review, reservation, and idempot
       prepare(sql) {
         return { bind(...args) { return {
           async first() {
-            if (sql.startsWith('SELECT id,owner,name,version,state FROM projects')) return structuredClone(db.rows.get(args[0]) ?? null);
+            if (sql.startsWith('SELECT id,owner,name,visibility,version,state FROM projects')) return structuredClone(db.rows.get(args[0]) ?? null);
             if (sql.startsWith('SELECT owner FROM projects')) return db.rows.has(args[0]) ? {owner: db.rows.get(args[0]).owner} : null;
             if (sql.startsWith('SELECT project,name,role FROM agents')) return structuredClone(db.agents.get(args[0]) ?? null);
             if (sql.startsWith('SELECT sessions.user,users.email')) return structuredClone(db.sessions.get(args[0]) ?? null);
@@ -169,7 +169,7 @@ test('integration retains all 29 authorization, review, reservation, and idempot
           },
           async all() { if (sql.startsWith('SELECT id,name FROM projects')) return {results:[...db.rows.values()].filter(r => r.owner === args[0]).map(r => ({id:r.id,name:r.name}))}; throw Error('Unhandled all query: ' + sql); },
           async run() {
-            if (sql.startsWith('INSERT INTO projects')) { db.rows.set(args[0], {id:args[0],owner:args[1],name:args[2],state:args[3],version:0}); return {meta:{changes:1}}; }
+            if (sql.startsWith('INSERT INTO projects')) { db.rows.set(args[0], {id:args[0],owner:args[1],name:args[2],visibility:args[3],state:args[4],version:0}); return {meta:{changes:1}}; }
             if (sql.startsWith('INSERT INTO agents')) { db.agents.set(args[0], {project:args[1],name:args[2],role:args[3]}); return {meta:{changes:1}}; }
             if (sql.startsWith('UPDATE projects SET state=')) { const row = db.rows.get(args[1]); if (row.version !== args[2]) return {meta:{changes:0}}; row.state = args[0]; row.version++; db.writes++; return {meta:{changes:1}}; }
             throw Error('Unhandled run query: ' + sql);
@@ -191,8 +191,8 @@ test('integration retains all 29 authorization, review, reservation, and idempot
     const {digest} = await import(pathToFileURL(checkout + '/lib/avc/auth.ts').href);
     const {decodeState, encodeState} = await import(pathToFileURL(checkout + '/lib/avc/state-codec.ts').href);
     const ownerCookie = 'synthetic-local-owner', strangerCookie = 'synthetic-local-stranger';
-    db.sessions.set(await digest(ownerCookie), {user:'local-owner',email:'owner@example.com'});
-    db.sessions.set(await digest(strangerCookie), {user:'local-stranger',email:'stranger@example.com'});
+    db.sessions.set(await digest(ownerCookie), {user:'local-owner',username:'owner',email:'owner@example.com'});
+    db.sessions.set(await digest(strangerCookie), {user:'local-stranger',username:'stranger',email:'stranger@example.com'});
     const request = async (body, credential = ownerCookie, expect = 200, expectedCode) => {
       const headers = {'Content-Type':'application/json', ...(credential.startsWith('avc_') ? {Authorization:'Bearer ' + credential} : {Cookie:'avc_session=' + credential})};
       const response = await POST(new Request('http://127.0.0.1/api/avc', {method:'POST',headers,body:JSON.stringify(body)}));

@@ -1,3 +1,5 @@
+import { readableRepository, discoverRepositories, privateResponseHeaders } from '@/lib/avc/repository-access';
+import { readerState, acceptedRevision, visibility } from '@/lib/avc/repository-visibility';
 import { bindings, readProject, mutate } from '@/lib/avc/storage';
 import { authorize, sameOrigin, digest, token } from '@/lib/avc/auth';
 import { GitStore } from '@/lib/avc/git';
@@ -9,7 +11,8 @@ import { assertSyncWritable } from '@/lib/avc/sync';
 import { liveSnapshot } from '@/lib/avc/live';
 const sample: Files = { 'src/users.rs': 'pub struct User {\n    pub id: u64,\n    pub name: String,\n}\n\npub fn find_user(id: u64) -> Option<User> {\n    if id == 1 {\n        Some(User { id, name: "Ada".into() })\n    } else {\n        None\n    }\n}\n\npub fn display_name(user: &User) -> String {\n    user.name.clone()\n}\n', 'Cargo.toml': '[package]\nname = "journey-demo"\nversion = "0.1.0"\nedition = "2021"\n\n[lib]\npath = "src/users.rs"\n', 'README.md': '# Journey demo\n\nA small Rust library for trying concurrent range locks and recorded changesets.\n\nRun cargo test locally. CI is optional.\n' };
 const field = (v: unknown, name: string, max = 4000) => { insist(typeof v === 'string' && v.trim().length > 0 && v.length <= max, 'invalid_input', `${name} is required (maximum ${max} characters).`, 400); return v.trim(); };
-function error(e: unknown) { const p = e as ProtocolError; return Response.json({ error: p.message ?? 'Unexpected server error.', code: p.code ?? 'server_error', details: p.details }, { status: p.status ?? 500 }); }
+function responseJson(value: unknown, init: ResponseInit = {}) { const headers = new Headers(privateResponseHeaders); new Headers(init.headers).forEach((value, key) => headers.set(key, value)); return Response.json(value, { ...init, headers }); }
+function error(e: unknown) { const p = e as ProtocolError; return responseJson({ error: p.message ?? 'Unexpected server error.', code: p.code ?? 'server_error', details: p.details }, { status: p.status ?? 500 }); }
 async function legacyActorRoles(project: string) {
     const rows = await bindings().db.prepare('SELECT digest,role FROM agents WHERE project=?').bind(project).all<{ digest: string; role: string }>();
     return Object.fromEntries(rows.results.map(row => ['agent:' + row.digest.slice(0, 16), row.role]));
@@ -18,24 +21,31 @@ export async function GET(req: Request) {
     try {
         const url = new URL(req.url);
         const id = url.searchParams.get('project');
-        const user = await authorize(req, id ?? undefined);
-        if (!id) {
-            insist(!user.agent, 'project_required', 'Agents must specify a repository.', 400);
-            const rows = await bindings().db.prepare('SELECT id,name FROM projects WHERE owner=?').bind(user.id).all();
-            return Response.json({ projects: rows.results, user });
+        if (!id) return responseJson(await discoverRepositories(req));
+        const access = await readableRepository(req, id), { user, project } = access;
+        let row = access.row;
+        if (!access.write) {
+            insist(!url.searchParams.has('journey') && !url.searchParams.has('approvals') && !url.searchParams.has('live'), 'forbidden', 'Repository workflow information is private.', 403);
+            const revision = url.searchParams.get('revision');
+            if (revision) {
+                const git = new GitStore(bindings().bucket, id);
+                insist(await acceptedRevision(git, row.state.head, revision), 'revision_not_found', 'Revision is not part of the accepted repository history.', 404);
+                return responseJson({ revision, files: await git.files(revision) });
+            }
+            return responseJson({ state: readerState(row.state), project, user });
         }
-        let row = await readProject(id);
+        insist(user, 'unauthorized', 'Sign in or provide a repository agent token.', 401);
         if (normalizePostedLocks(row.state) || row.state.leases.some(l => !leaseActive(l))) {
             await mutate(id, () => null);
             row = await readProject(id);
         }
-        if (url.searchParams.get('approvals') === '1') return Response.json(approvalInbox(row.state, user, Number(url.searchParams.get('since') ?? 0), await legacyActorRoles(id)));
+        if (url.searchParams.get('approvals') === '1') return responseJson(approvalInbox(row.state, user, Number(url.searchParams.get('since') ?? 0), await legacyActorRoles(id)));
         const git = new GitStore(bindings().bucket, id);
-        if (url.searchParams.get('live') === '1') return Response.json(await liveSnapshot(row.state, revision => git.files(revision)), { headers: { 'Cache-Control': 'private, no-store' } });
+        if (url.searchParams.get('live') === '1') return responseJson(await liveSnapshot(row.state, revision => git.files(revision)), { headers: { 'Cache-Control': 'private, no-store' } });
         const revision = url.searchParams.get('revision');
         if (revision) {
             insist(row.state.revisions[revision] || Object.values(row.state.sync?.backupRefs ?? {}).includes(revision), 'revision_not_found', 'Revision is not part of this repository.', 404);
-            return Response.json({ revision, files: await git.files(revision) });
+            return responseJson({ revision, files: await git.files(revision) });
         }
         const journey = url.searchParams.get('journey');
         if (journey) {
@@ -43,9 +53,9 @@ export async function GET(req: Request) {
             insist(!user.agent || j.actor === user.id, 'forbidden', 'This inbox belongs to another agent.', 403);
             const since = Number(url.searchParams.get('since') ?? 0);
             insist(Number.isSafeInteger(since) && since >= 0, 'invalid_cursor', 'Invalid event cursor.', 400);
-            return Response.json({ events: row.state.events.filter(e => e.id > since && (e.targets.includes(journey) || e.journey === journey)), cursor: row.state.sequence, integrationCursor: row.state.integrationCursor });
+            return responseJson({ events: row.state.events.filter(e => e.id > since && (e.targets.includes(journey) || e.journey === journey)), cursor: row.state.sequence, integrationCursor: row.state.integrationCursor });
         }
-        return Response.json({ state: publicState(row.state, user.id, user.agent), user });
+        return responseJson({ state: publicState(row.state, user.id, user.agent), project, user });
     }
     catch (e) {
         return error(e);
@@ -58,21 +68,27 @@ export async function POST(req: Request) {
         insist(text.length < 1000000, 'request_too_large', 'Request exceeds 1 MB.', 413);
         const b = JSON.parse(text);
         const action = field(b.action, 'Action', 40);
-        const user = await authorize(req, b.project);
+        const user = await authorize(req, action === 'create_project' ? undefined : b.project);
         if (action === 'create_project') {
             insist(!user.agent, 'forbidden', 'Only humans can create repositories.', 403);
-            const name = field(b.name, 'Repository name', 80), id = crypto.randomUUID();
+            const name = field(b.name, 'Repository name', 80), id = crypto.randomUUID(), access = visibility(b.visibility ?? 'private');
             const git = new GitStore(bindings().bucket, id);
             const files = b.files ?? (b.empty ? {} : sample);
             insist(files && typeof files === 'object' && !Array.isArray(files) && Object.values(files).every(v => typeof v === 'string'), 'invalid_files', 'Files must map paths to text.', 400);
             const c = await git.save(files, undefined, 'Initialize repository', user.name);
             const s: State = { id, name, head: c.oid, revisions: { [c.oid]: c.meta }, journeys: [], leases: [], waiting: [], events: [], sequence: 0, integrationCursor: 0, generation: 0, receipts: {}, requireApproval: true, allowWorkerMerge: true, allowCoordinatorApproval: false };
             emit(s, 'repository.created', user.id, { name, revision: c.oid });
-            await bindings().db.prepare('INSERT INTO projects(id,owner,name,state) VALUES(?,?,?,?)').bind(id, user.id, name, JSON.stringify(s)).run();
-            return Response.json({ project: id });
+            await bindings().db.prepare('INSERT INTO projects(id,owner,name,visibility,state) VALUES(?,?,?,?,?)').bind(id, user.id, name, access, JSON.stringify(s)).run();
+            return responseJson({ project: id });
         }
         insist(b.project, 'project_required', 'Specify a repository.', 400);
         const id = b.project as string;
+        if (action === 'visibility') {
+            insist(!user.agent, 'forbidden', 'Only the repository owner can change visibility.', 403);
+            const access = visibility(b.visibility);
+            await bindings().db.prepare('UPDATE projects SET visibility=? WHERE id=? AND owner=?').bind(access, id, user.id).run();
+            return responseJson({ ok: true, visibility: access });
+        }
         const git = new GitStore(bindings().bucket, id);
         if (action === 'create_agent' || action === 'delegate_agent') {
             insist(!user.agent || (action === 'delegate_agent' && user.role === 'coordinator'), 'forbidden', 'Only humans or a repository coordinator can issue worker credentials.', 403);
@@ -80,12 +96,12 @@ export async function POST(req: Request) {
             const raw = token();
             const hash = await digest(raw);
             await bindings().db.prepare('INSERT INTO agents(digest,project,name,role,created) VALUES(?,?,?,?,?)').bind(hash, id, name, !user.agent && b.coordinator ? 'coordinator' : 'worker', Date.now()).run();
-            return Response.json({ token: raw, name, actor: 'agent:' + hash.slice(0, 16) });
+            return responseJson({ token: raw, name, actor: 'agent:' + hash.slice(0, 16) });
         }
         if (action === 'revoke_agent') {
             insist(!user.agent, 'forbidden', 'Only humans can revoke credentials.', 403);
             await bindings().db.prepare('DELETE FROM agents WHERE digest=? AND project=?').bind(await digest(field(b.token, 'Token', 100)), id).run();
-            return Response.json({ ok: true });
+            return responseJson({ ok: true });
         }
         const legacyRoles = action === 'review' && b.kind === 'approve' && user.agent ? await legacyActorRoles(id) : {};
         const requestId = field(b.requestId, 'Request ID', 100);
@@ -281,7 +297,7 @@ export async function POST(req: Request) {
             s.receipts[user.id + ':' + requestId] = { request: fingerprint, result };
             return result;
         });
-        return Response.json({ result });
+        return responseJson({ result });
     }
     catch (e) {
         return error(e);

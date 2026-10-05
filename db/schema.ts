@@ -1,5 +1,6 @@
-import { sqliteTable, text, integer, index } from 'drizzle-orm/sqlite-core';
-export const projects = sqliteTable('projects', { id: text('id').primaryKey(), owner: text('owner').notNull(), name: text('name').notNull(), version: integer('version').notNull().default(0), state: text('state').notNull() }, t => [index('idx_projects_owner').on(t.owner)]);
+import { sql } from 'drizzle-orm';
+import { sqliteTable, text, integer, index, check } from 'drizzle-orm/sqlite-core';
+export const projects = sqliteTable('projects', { id: text('id').primaryKey(), owner: text('owner').notNull(), name: text('name').notNull(), visibility: text('visibility', { enum: ['private', 'public'] }).notNull().default('private'), version: integer('version').notNull().default(0), state: text('state').notNull() }, t => [index('idx_projects_owner').on(t.owner), index('idx_projects_visibility').on(t.visibility), check('projects_visibility_check', sql`${t.visibility} in ('private', 'public')`)]);
 export const users = sqliteTable('users', { id: text('id').primaryKey(), username: text('username').notNull().unique(), email: text('email').notNull().unique(), password: text('password').notNull() });
 export const sessions = sqliteTable('sessions', { digest: text('digest').primaryKey(), user: text('user').notNull(), expires: integer('expires').notNull() }, t => [index('idx_sessions_user_expires').on(t.user, t.expires)]);
 export const agents = sqliteTable('agents', { digest: text('digest').primaryKey(), project: text('project').notNull(), name: text('name').notNull(), role: text('role').notNull().default('worker'), created: integer('created').notNull() });

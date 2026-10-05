@@ -119,15 +119,17 @@ function renderCodeWorkspace(options = {}) {
     const source = readFileSync(new URL('../app/page.tsx', import.meta.url), 'utf8');
     const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } }).outputText;
     let index = 0;
-    const initial = [{ id: 'user', name: 'Reader' }, false, [{ id: 'repo', name: 'journey' }], options.draft ?? { revision: '', path: '', content: '' }];
+    const initial = [options.anonymous ? null : { id: 'user', name: 'Reader' }, false, [{ id: 'repo', name: 'journey' }], options.draft ?? { revision: '', path: '', content: '' }];
     const testModule = { exports: {} };
     const mockRequire = name => {
         if (name === 'react') return { ...React, useState: value => { const at = index++; return [at < initial.length ? initial[at] : value, next => options.onState?.(at, next)]; }, useEffect: (effect, dependencies) => options.onEffect?.(effect, dependencies), useCallback: callback => callback };
         if (name === '@/hooks/use-repository') return {
-            useRepository: () => ({ state, setState: options.setRepositoryState ?? (() => {}), reload: options.reload ?? (async () => {}), status: 'ready', error: '' }),
+            useRepository: () => ({ state, repository: { id: 'repo', name: 'journey', visibility: 'private', owner: { username: 'owner' }, permissions: { read: true, write: !options.readOnly } }, setState: options.setRepositoryState ?? (() => {}), reload: options.reload ?? (async () => {}), status: 'ready', error: '' }),
             useRepositoryFiles: (project, revision) => { options.onFiles?.(project, revision); return ({ key: 'repo:main', status: 'ready', error: '', files: { 'README.md': 'Imported repository code' }, reload: async () => {} }); },
         };
         if (name === '@/components/live-lock-map') return { LiveLockMap: props => React.createElement('section', { 'aria-label': 'Live repository map', 'data-project': props.project }) };
+        if (name === '@/components/account-auth') return { AccountAuth: () => null };
+        if (name === '@/components/public-repository') return { PublicRepository: () => React.createElement('section', null, 'Public accepted repository code') };
         if (name === '@/components/journey-sidebar') return { JourneySidebar: () => null };
         if (name === '@/components/git-sync-warning') return { GitSyncWarning: () => null };
         if (name === '@/components/cli-install') return { CliInstall: () => null };
@@ -247,4 +249,13 @@ test('the live map is available without a journey and does not request full file
     assert.match(html, /aria-label="Live repository map" data-project="repo"/);
     assert.doesNotMatch(html, /One feature\. One journey\./);
     assert.equal(requests[0].project, '', 'disable content fetching while the compact live snapshot is displayed');
+});
+
+
+test('another account and anonymous visitors receive the public browser without workflow or settings controls', () => {
+    for (const anonymous of [false, true]) {
+        const html = renderCodeWorkspace({ readOnly: true, anonymous, tab: 'agents', selected: 'private-journey', journeys: [] });
+        assert.match(html, /Public accepted repository code/);
+        assert.doesNotMatch(html, /New journey|Create agent token|Download connection|Repository settings|Sign out/);
+    }
 });

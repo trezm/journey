@@ -8,10 +8,11 @@ import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { GitSyncSettings } from '@/components/git-sync-settings';
 import { repositoryPolicy, type State } from '@/lib/avc/core';
+import type { RepositorySummary, Visibility } from '@/lib/avc/repository-visibility';
 import styles from './settings.module.css';
 
 type Policy = ReturnType<typeof repositoryPolicy>;
-type Repository = { state: State; user: { agent: boolean } };
+type Repository = { state: State; user: { agent: boolean } | null; project: RepositorySummary };
 async function request<T>(url: string, init?: RequestInit) {
     const response = await fetch(url, init);
     const data = await response.json() as T & { error?: string };
@@ -41,7 +42,7 @@ export default function RepositorySettings() {
         });
         return () => { active = false; };
     }, [project]);
-    const editable = repository && !repository.user.agent;
+    const editable = !!repository?.project.permissions.write && !repository?.user?.agent;
     const changed = saved && draft && Object.keys(saved).some(key => saved[key as keyof Policy] !== draft[key as keyof Policy]);
     function change(key: keyof Policy, value: boolean) { setDraft(p => p ? { ...p, [key]: value } : p); setNotice(''); }
     async function save(event: React.FormEvent) {
@@ -57,6 +58,16 @@ export default function RepositorySettings() {
         } catch (e) { setError((e as Error).message); }
         finally { setSaving(false); }
     }
+    async function saveVisibility(value: Visibility) {
+        if (!editable || !repository || saving) return;
+        setSaving(true); setError(''); setNotice('');
+        try {
+            await request('/api/avc', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'visibility', project, visibility: value }) });
+            setRepository({ ...repository, project: { ...repository.project, visibility: value } });
+            setNotice(`Repository is now ${value}.`);
+        } catch (e) { setError((e as Error).message); }
+        finally { setSaving(false); }
+    }
     return <main className={styles.page}>
         <header className={styles.header}><Link href="/" className={styles.brand}><span><GitBranch size={22}/></span>Journey</Link>{project ? <a href={hrefFor({ journey: '', tab: 'code', mode: 'repository', path: '' })} className={styles.back}><ArrowLeft size={16}/>Back to workspace</a> : <span className={styles.back} aria-disabled="true"><ArrowLeft size={16}/>Back to workspace</span>}</header>
         <div className={styles.content}>
@@ -64,7 +75,9 @@ export default function RepositorySettings() {
             {loading && <p role="status" className={styles.loading}>Loading settings…</p>}
             {error && <div role="alert" className={styles.error}><AlertTriangle size={18}/><span>{error}</span></div>}
             {notice && <div role="status" className={styles.success}><CheckCircle2 size={18}/>{notice}</div>}
-            {!loading && draft && <form onSubmit={save} className={styles.card}>
+            {!loading && repository && !editable && <p className={styles.ownerOnly}>Only the repository owner can access settings. Open repository code to browse this public repository.</p>}
+            {!loading && editable && repository && <section className={styles.card}><div className={styles.cardHeading}><ShieldCheck size={20}/><div><h2>Repository visibility</h2><p>Owned by {repository.project.owner.username}. Repositories belong to one personal account.</p></div></div><div className={styles.row}><div className={styles.copy}><label htmlFor="repository-visibility">Visibility</label><p id="repository-visibility-help">Private repositories are visible only to you and your repository agents. Public repositories let anyone read accepted code and Git history, including original commit author metadata. Journeys, reviews, recordings, and credentials stay private. Making a repository private cannot recall copies already downloaded.</p></div><select id="repository-visibility" aria-describedby="repository-visibility-help" value={repository.project.visibility} disabled={saving} onChange={event => { void saveVisibility(event.target.value as Visibility); }}><option value="private">Private</option><option value="public">Public</option></select></div></section>}
+            {!loading && editable && draft && <form onSubmit={save} className={styles.card}>
                 <div className={styles.cardHeading}><ShieldCheck size={20}/><div><h2>Repository permissions</h2><p>These settings apply to this repository and all of its journeys.</p></div></div>
                 {!editable && <p className={styles.ownerOnly}>Only the repository owner can change these settings.</p>}
                 <div className={styles.row}><div className={styles.icon}><GitMerge size={20}/></div><div className={styles.copy}><label htmlFor="worker-merge">Allow workers to merge</label><p id="worker-merge-help">Workers can merge their own submitted journeys after required approval. Current locks and reconciliation are still required. When off, the owner merges completed journeys.</p></div><Switch id="worker-merge" aria-describedby="worker-merge-help" checked={draft.allowWorkerMerge} onCheckedChange={v => change('allowWorkerMerge', v)} disabled={!editable || saving}/></div>
@@ -72,7 +85,7 @@ export default function RepositorySettings() {
                 <div className={styles.row}><div className={styles.icon}><ShieldCheck size={20}/></div><div className={styles.copy}><label htmlFor="require-approval">Require approval for worker merges</label><p id="require-approval-help">Workers need approval of the exact current revision by the owner or an allowed coordinator. The Integrate button always requires approval. New patches or compatibility declarations require another review.</p></div><Switch id="require-approval" aria-describedby="require-approval-help" checked={draft.requireApproval} onCheckedChange={v => change('requireApproval', v)} disabled={!editable || saving}/></div>
                 <footer className={styles.footer}><p>{changed ? 'You have unsaved changes.' : 'Settings are up to date.'}</p><div><Button type="button" variant="outline" disabled={!changed || saving} onClick={() => { setDraft(saved); setNotice(''); }}>Discard changes</Button><Button type="submit" disabled={!editable || !changed || saving}>{saving ? 'Saving…' : 'Save settings'}</Button></div></footer>
             </form>}
-            {!loading && repository && project && <GitSyncSettings key={project} project={project}/>}
+            {!loading && editable && repository && project && <GitSyncSettings key={project} project={project}/>}
             {!loading && !repository && <Link href="/" className={styles.recovery}>Open your workspace to sign in and select a repository.</Link>}
         </div>
     </main>;

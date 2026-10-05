@@ -178,8 +178,9 @@ test('actual live HTTP handler authenticates, strips private data and expires gr
     } });
     const db = { rows: new Map(), agents: new Map(), prepare(sql) { return { bind(...args) { return {
         async first() {
+            if (sql.startsWith('SELECT username FROM users')) return { username: 'owner' };
             if (sql.startsWith('SELECT project,name,role FROM agents')) return db.agents.get(args[0]) ?? null;
-            if (sql.startsWith('SELECT id,owner,name,version,state FROM projects')) return structuredClone(db.rows.get(args[0]) ?? null);
+            if (sql.startsWith('SELECT id,owner,name,visibility,version,state FROM projects')) return structuredClone(db.rows.get(args[0]) ?? null);
             throw Error('Unexpected query: ' + sql);
         },
         async run() {
@@ -203,9 +204,9 @@ test('actual live HTTP handler authenticates, strips private data and expires gr
     const state = fixture(commit.oid), holder = journey(state, 'holder'), waiter = journey(state, 'waiter');
     request(state, holder, [scope(3)]); request(state, waiter, [scope(3)]);
     state.receipts.private = { token: 'private-receipt-token' };
-    db.rows.set('repo', { id: 'repo', owner: 'owner', name: 'Repo', version: 0, state: encodeState(state) });
+    db.rows.set('repo', { id: 'repo', owner: 'owner', name: 'Repo', visibility: 'private', version: 0, state: encodeState(state) });
     const get = (project = 'repo', headers = { Authorization: 'Bearer local-test-agent' }) => GET(new Request(`http://localhost/api/avc?project=${project}&live=1`, { headers }));
-    assert.equal((await get('repo', {})).status, 401); assert.equal((await get('other')).status, 403);
+    assert.equal((await get('repo', {})).status, 404); assert.equal((await get('other')).status, 404);
     const response = await get(), result = await response.json();
     assert.equal(response.status, 200); assert.equal(response.headers.get('cache-control'), 'private, no-store');
     assert.deepEqual(Object.keys(result).sort(), ['changesets', 'files', 'head', 'sequence', 'summary', 'updatedAt']);

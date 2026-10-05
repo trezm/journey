@@ -1,5 +1,6 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
+import type { RepositorySummary } from '@/lib/avc/repository-visibility';
 import type { State, Files } from '@/lib/avc/core';
 import { LatestResource, type Resource } from '@/lib/repository-code';
 import { jsonFetch } from '@/lib/avc/client';
@@ -7,7 +8,7 @@ import { jsonFetch } from '@/lib/avc/client';
 async function fetchJson<T>(url: string, signal: AbortSignal): Promise<T> {
     return await jsonFetch(url, { signal, cache: 'no-store' }) as T;
 }
-const fetchRepository = (project: string, signal: AbortSignal) => fetchJson<{ state: State }>(`/api/avc?project=${encodeURIComponent(project)}`, signal);
+const fetchRepository = (project: string, signal: AbortSignal) => fetchJson<{ state: State; project: RepositorySummary }>(`/api/avc?project=${encodeURIComponent(project)}`, signal);
 const EMPTY_FILES: Files = Object.freeze({});
 const fetchFiles = (key: string, signal: AbortSignal) => {
     const [project, revision] = key.split(':');
@@ -33,7 +34,7 @@ export function useRepository(project: string) {
     const resource = useResource(project, fetchRepository);
     const { clear } = resource;
     const setState = useCallback((value: null) => { if (value === null) clear(); }, [clear]);
-    return { ...resource, state: resource.data?.state ?? null, setState };
+    return { ...resource, state: resource.data?.state ?? null, repository: resource.data?.project ?? null, setState };
 }
 
 export function useRepositoryFiles(project: string, revision: string | undefined) {
