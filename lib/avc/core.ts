@@ -261,9 +261,17 @@ export function acquire(s: State, j: Journey, changeset: string, scopes: Scope[]
         insist(!s.leases.some(l => l.journey === j.id && leaseActive(l, now)), 'would_deadlock', 'Cannot wait for additional conflicting scopes while holding locks. Wait for the other journey to integrate or be abandoned, or abandon this journey to release its holds.', 409, { conflicts });
         let w = s.waiting.find(w => w.journey === j.id && w.changeset === changeset);
         if (!w) {
-            w = { id: crypto.randomUUID(), journey: j.id, changeset, scopes, revision, actor, at: now };
+            w = { id: crypto.randomUUID(), journey: j.id, changeset, scopes: structuredClone(scopes), revision, actor, at: now };
             s.waiting.push(w);
             emit(s, 'lock.queued', actor, { requestId: w.id, conflicts: conflicts.map(l => l.id) }, j.id, [j.id]);
+        }
+        else if (w.revision !== revision || JSON.stringify(w.scopes) !== JSON.stringify(scopes)) {
+            // One pending request per changeset. A retry may target a newer revision
+            // or different scopes; keep its identity and queue age, not stale ranges.
+            w.scopes = structuredClone(scopes);
+            w.revision = revision;
+            w.actor = actor;
+            emit(s, 'lock.queue_updated', actor, { requestId: w.id, conflicts: conflicts.map(l => l.id) }, j.id, [j.id]);
         }
         return { queued: true, requestId: w.id, conflicts };
     }

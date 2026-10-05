@@ -6,6 +6,7 @@ export const dynamic = 'force-dynamic';
 import { submitForReview, reconciliationPlan, recordReconciliation, leaseActive, normalizePostedLocks } from '@/lib/avc/core';
 import { integrationFiles } from '@/lib/avc/integration';
 import { assertSyncWritable } from '@/lib/avc/sync';
+import { liveSnapshot } from '@/lib/avc/live';
 const sample: Files = { 'src/users.rs': 'pub struct User {\n    pub id: u64,\n    pub name: String,\n}\n\npub fn find_user(id: u64) -> Option<User> {\n    if id == 1 {\n        Some(User { id, name: "Ada".into() })\n    } else {\n        None\n    }\n}\n\npub fn display_name(user: &User) -> String {\n    user.name.clone()\n}\n', 'Cargo.toml': '[package]\nname = "journey-demo"\nversion = "0.1.0"\nedition = "2021"\n\n[lib]\npath = "src/users.rs"\n', 'README.md': '# Journey demo\n\nA small Rust library for trying concurrent range locks and recorded changesets.\n\nRun cargo test locally. CI is optional.\n' };
 const field = (v: unknown, name: string, max = 4000) => { insist(typeof v === 'string' && v.trim().length > 0 && v.length <= max, 'invalid_input', `${name} is required (maximum ${max} characters).`, 400); return v.trim(); };
 function error(e: unknown) { const p = e as ProtocolError; return Response.json({ error: p.message ?? 'Unexpected server error.', code: p.code ?? 'server_error', details: p.details }, { status: p.status ?? 500 }); }
@@ -30,6 +31,7 @@ export async function GET(req: Request) {
         }
         if (url.searchParams.get('approvals') === '1') return Response.json(approvalInbox(row.state, user, Number(url.searchParams.get('since') ?? 0), await legacyActorRoles(id)));
         const git = new GitStore(bindings().bucket, id);
+        if (url.searchParams.get('live') === '1') return Response.json(await liveSnapshot(row.state, revision => git.files(revision)), { headers: { 'Cache-Control': 'private, no-store' } });
         const revision = url.searchParams.get('revision');
         if (revision) {
             insist(row.state.revisions[revision] || Object.values(row.state.sync?.backupRefs ?? {}).includes(revision), 'revision_not_found', 'Revision is not part of this repository.', 404);
