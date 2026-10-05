@@ -56,8 +56,9 @@
   "vars": {
     "AVC_ACCESS_TEAM_DOMAIN": "mertz.cloudflareaccess.com",
     "AVC_ACCESS_AUD": "875efad6b43955c6a936e44b379a3074a7bd71f7309e8539cda974f4d39d0681",
-    "AVC_OAUTH_ORIGIN": "",
+    "AVC_OAUTH_ORIGIN": "https://journey.peter-s-mertz.workers.dev",
     "AVC_GITHUB_CLIENT_ID": "",
-    "AVC_GITLAB_CLIENT_ID": ""
+    "AVC_GITLAB_CLIENT_ID": "",
+    "AVC_AUTH_MODE": "password"
   }
 }

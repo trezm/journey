@@ -1,6 +1,6 @@
 # Deploy Journey to Cloudflare Workers
 
-The production workspace is now `https://journey.peter-s-mertz.workers.dev`, using the configured `journey` D1 database and private `journey-git` R2 bucket. Its original repository history and existing agent credentials were copied and checked against a complete private source backup. Owner sign-in uses Cloudflare Access and the explicit verified owner mapping described below.
+The production workspace is now `https://journey.peter-s-mertz.workers.dev`, using the configured `journey` D1 database and private `journey-git` R2 bucket. Its original repository history and existing agent credentials were copied and checked against a complete private source backup. The checked-in production configuration selects username/email/password accounts. The existing owner is bootstrapped with the same verified owner ID; repository ownership and agent credentials stay unchanged. Cloudflare Access configuration is retained for rollback, with the cutover sequence described below.
 
 The former ChatGPT Site runs only the retirement handler in `build/sites-worker.ts`: browser navigation redirects to the Cloudflare origin, while old API, export and mutation requests return `410 site_moved`. It cannot read or write the preserved source storage. Keep the source database and bucket for rollback; do not redeploy the previous writable application without first pausing Cloudflare writes and reconciling all subsequent changes. Private connection profiles must use the Cloudflare origin and omit the obsolete `siteToken`; repository credentials remain unchanged.
 
@@ -17,7 +17,7 @@ pnpm cf:types
 pnpm dev
 ```
 
-Open `http://127.0.0.1:5173`, then create an email/password account. Local development uses simulated D1/R2 under `.wrangler/state`; the configured production resources are not contacted. The placeholder D1 ID in the checked-in configuration is for local development only. The compatibility date matches the pinned local Workers runtime. Upgrade the locked Cloudflare packages together before advancing the date to enable newer runtime behavior.
+Open `http://127.0.0.1:5173`, then create a username/email/password account. Local development uses simulated D1/R2 under `.wrangler/state`; the configured production resources are not contacted. The checked-in D1 ID identifies production; local commands still use simulated storage. Use separate bindings for staging, and never add `remote: true` to local bindings unintentionally. The compatibility date matches the pinned local Workers runtime. Upgrade the locked Cloudflare packages together before advancing the date to enable newer runtime behavior.
 
 Verify the production bundle without publishing:
 
@@ -69,7 +69,7 @@ If moving an existing Site with repositories, follow the migration section first
    pnpm cf secret put GITHUB_SYNC_KEY
    ```
 
-   Preserve this key across deployments: changing it makes existing encrypted GitHub tokens unreadable until owners reconnect them. The checked-in configuration requires the secret and binds `GITHUB_SYNC_QUEUE` as producer and consumer, with a five-minute Cron Trigger. Use separate queues and secrets for staging. See [hosted GitHub sync setup and recovery](git-sync.md).
+   Preserve this key across deployments: changing it makes existing encrypted GitHub tokens and provider OAuth connections unreadable until owners reconnect them. The checked-in configuration requires the secret and binds `GITHUB_SYNC_QUEUE` as producer and consumer, with a five-minute Cron Trigger. Use separate queues and secrets for staging. See [hosted Git sync setup and recovery](git-sync.md) and [GitHub/GitLab OAuth configuration](OAUTH.md).
 
    Apply migrations, verify and publish:
 
@@ -80,7 +80,7 @@ If moving an existing Site with repositories, follow the migration section first
    pnpm deploy
    ```
 
-   The deploy command rebuilds before publishing the generated Worker and its client assets. Wrangler reports the `workers.dev` URL. Open it and create an account. Email/password sessions and repository-scoped agent authentication do not use this encryption secret. Hosted GitHub sync requires it. Verify the generated deployment configuration retains the Queue bindings and Cron Trigger, and that the built Worker exports both scheduled and queue handlers.
+   The deploy command rebuilds before publishing the generated Worker and its client assets. Wrangler reports the `workers.dev` URL. Open it and create a username/email/password account. Password sessions and repository-scoped agent authentication do not use this encryption secret. Hosted GitHub sync requires it. Verify the generated deployment configuration retains the Queue bindings and Cron Trigger, and that the built Worker exports both scheduled and queue handlers.
 
 4. To use a custom domain, add a `routes` entry to `wrangler.jsonc` and rebuild/redeploy:
 
@@ -117,7 +117,7 @@ A Site's managed D1/R2 resources are not automatically owned by your Cloudflare 
    pnpm cf d1 migrations list DB --remote
    ```
 
-   An up-to-date exported schema contains `users`, `sessions`, `auth_attempts`, `projects`, `agents`, the `agents.role` column and `idx_projects_owner`. If the source applied the three current Drizzle SQL files without Wrangler's `d1_migrations` ledger, running them again would fail on existing tables/columns. Only after verifying the schema matches **all three** files, baseline those already-applied migrations with this administrative SQL (save it privately and execute via `pnpm cf d1 execute DB --remote --file PATH`):
+   An up-to-date exported schema contains `users`, `sessions`, `auth_attempts`, `projects`, `agents`, the `agents.role` column and `idx_projects_owner`. If the source applied the three original Drizzle SQL files without Wrangler's `d1_migrations` ledger, running them again would fail on existing tables/columns. Only after verifying the schema matches **all three** files, baseline those already-applied migrations with this administrative SQL (save it privately and execute via `pnpm cf d1 execute DB --remote --file PATH`):
 
    ```sql
    CREATE TABLE IF NOT EXISTS d1_migrations (
@@ -131,27 +131,9 @@ A Site's managed D1/R2 resources are not automatically owned by your Cloudflare 
      ('0002_volatile_exiles.sql');
    ```
 
-   If only part of the schema exists, baseline only migrations whose exact changes are already present, then apply the remaining migrations. Future generated SQL files continue through `db:migrate:remote`. No repository metadata/Git format changes are required for this deployment migration.
+   If only part of the schema exists, baseline only migrations whose exact changes are already present, then apply the remaining migrations. Apply later migrations through `0005_oauth_connections.sql` using `db:migrate:remote`: `0003` adds usernames while preserving existing account IDs, `0004` makes existing repositories private, and `0005` adds provider connections. Never baseline these later files merely because the original tables exist. Future generated SQL files continue through the same migration ledger. No Git object format changes are required.
 
-4. Email/password owners retain their existing user IDs. Owners created through ChatGPT sign-in have `projects.owner` values starting with `siwc:` and need an explicit ownership mapping; public Workers intentionally ignore all `oai-authenticated-user-*` headers. After deploying the target, each intended owner registers an email/password account. As the authenticated database administrator, inspect the project and the registered user:
-
-   ```sh
-   pnpm cf d1 execute DB --remote --command "SELECT id,name,owner FROM projects; SELECT id,email FROM users;"
-   ```
-
-   Verify the person's identity using the existing hosting account or another trusted administrative record. Matching an unverified email address alone is insufficient. For each verified project/owner pair, save and execute SQL with the actual IDs replacing the three placeholders:
-
-   ```sql
-   UPDATE projects
-   SET owner = 'REGISTERED_USER_UUID', version = version + 1
-   WHERE id = 'EXACT_PROJECT_ID'
-     AND owner = 'siwc:EXACT_OLD_PLATFORM_USER_ID'
-     AND EXISTS (SELECT 1 FROM users WHERE id = 'REGISTERED_USER_UUID');
-   SELECT changes() AS reassigned_projects;
-   SELECT id,name,owner FROM projects WHERE id = 'EXACT_PROJECT_ID';
-   ```
-
-   Require exactly one updated row; investigate zero rather than broadening the filter. Repeat only for explicitly verified projects. Historical journey/review actor IDs stay unchanged for audit history. No public ownership-claim endpoint or automatic email-based takeover is introduced.
+4. Existing password owners retain their existing user IDs. Owners created through ChatGPT sign-in or Cloudflare Access can have legacy IDs such as `siwc:` values. Public Workers ignore all `oai-authenticated-user-*` headers. Verify each owner against the trusted original account record or private Access owner mapping, then administratively create the password account with `users.id` equal to that exact existing owner ID. Use a unique normalized username, the independently verified mapped email, and a compatible PBKDF2 password hash. Do not overwrite an existing account or change `projects.owner` to a new registration UUID. Follow the protected [owner bootstrap sequence](#switch-an-existing-access-owner-to-personal-accounts) below. Matching an unverified registration email is never sufficient to claim existing repositories.
 
 5. Open each migrated repository in the target, inspect its code and timeline, and clone it with a repository agent token. Validate main/branches/tags and `git fsck`. Switch the final domain only after validation. Keep the old SQL/object backups for rollback.
 
@@ -172,11 +154,25 @@ Use `pnpm cf tail` for Worker logs and monitor D1/R2 errors. Worker observabilit
 
 References: [Cloudflare Vite plugin](https://developers.cloudflare.com/workers/vite-plugin/reference/api/), [Wrangler configuration](https://developers.cloudflare.com/workers/wrangler/configuration/), [D1 migrations](https://developers.cloudflare.com/d1/reference/migrations/), [Workers best practices](https://developers.cloudflare.com/workers/best-practices/workers-best-practices/).
 
+## Switch an existing Access owner to personal accounts
+
+The production configuration sets `AVC_AUTH_MODE=password` and `AVC_OAUTH_ORIGIN=https://journey.peter-s-mertz.workers.dev`. Preserve `AVC_ACCESS_TEAM_DOMAIN`, `AVC_ACCESS_AUD` and the private `AVC_ACCESS_OWNER_MAP` secret for rollback. The explicit password mode takes precedence over those retained values. This configuration does not provision OAuth applications: GitHub and GitLab buttons remain disabled until the corresponding client IDs and secrets are supplied as described in [OAuth setup](OAUTH.md).
+
+For the production owner, use username `pete` and the exact owner ID already shared by the existing private repositories. The owner ID and verified email come from the trusted private mapping; do not publish those mapping values. Provisioning a matching `users.id` preserves access without any repository ownership rewrite.
+
+1. Keep the existing Journey Access gate in place while preparing the cutover. Back up D1 and the Journey Access application configuration privately. Confirm migrations through `0005_oauth_connections.sql` are applied, inspect current account rows and repository owners, and verify that every intended repository owner matches the trusted mapping.
+2. Generate the initial owner password with secure randomness in the local bootstrap process. Use the application-compatible salted PBKDF2-SHA-256 hash (100,000 iterations, 32 derived bytes, stored as `salt:hex`) and insert the verified owner ID, unique normalized username and verified mapped email into `users`. Use a guarded administrative insertion that refuses ID, username or email collisions; do not upsert over an existing password account. Store the plaintext only in a protected owner-readable file outside Git, using mode `0600` and a mode `0700` containing directory. Never print credentials or include them in command arguments, Journey recordings, commits or browser-visible configuration.
+3. Deploy the password-mode Worker while the Access gate still protects the host. Verify the deployed configuration has `AVC_AUTH_MODE=password`, the bootstrapped account row uses the original mapped owner ID, and every existing repository is still private and owned by that ID. Verify repository-scoped agent credentials still work. The existing gate blocks `/api/auth`, so a normal password login cannot be verified at this stage without an authenticated Access session. Do not open the gate before both deployment and account bootstrap are verified.
+4. Change only the Journey Access application policy so unauthenticated requests can reach the account UI, authentication endpoint, OAuth callbacks and repository routes. Immediately verify username login and email login through the actual hostname, confirm both yield the original owner ID and access to every existing repository, and confirm anonymous requests and a separate account cannot read those private repositories. Application authorization continues protecting private repositories, mutations and credentials; opening the outer gate does not make repositories public. If verification fails, restore the Journey gate immediately and diagnose before reopening it. Keep unrelated Access applications unchanged.
+5. Hand off the initial credential through its protected local file. This release has no password-change, reset, email verification or recovery flow, so the generated password remains valid until an administrator explicitly rotates its hash. Retain it securely; it is not a one-time setup token.
+
+To roll back authentication, restore the Journey Access gate and deploy `AVC_AUTH_MODE=access` with the preserved team, audience and owner-map secret. Verify the mapped owner and existing repository agents still work. Keep the new account rows, repositories and migrations intact; password accounts created after cutover remain stored but cannot sign in while Access mode is active. Code rollback alone does not restore an Access application policy.
+
 ## Preserve an existing private owner through Cloudflare Access
 
-A private deployment can use Cloudflare Access instead of creating a password account. Configure a self-hosted Access application for the final Worker hostname and previews, with an allow policy matching only the existing, independently verified owner email. The owner mapping below is administrative configuration; never infer it from a newly registered or unverified email. Compare every source project owner with the trusted original account record before enabling traffic.
+A private deployment, or an explicit rollback of the production cutover, can use Cloudflare Access instead of password authentication. Set `AVC_AUTH_MODE=access` before following this section; it describes the optional private deployment policy, not the public account deployment. Configure a self-hosted Access application for the final Worker hostname and previews, with an allow policy matching only the existing, independently verified owner email. The owner mapping below is administrative configuration; never infer it from a newly registered or unverified email. Compare every source project owner with the trusted original account record before enabling traffic.
 
-Set `AVC_ACCESS_TEAM_DOMAIN` to the existing HTTPS team origin (for example `https://yourteam.cloudflareaccess.com`) and `AVC_ACCESS_AUD` to that application's audience tag. Store `AVC_ACCESS_OWNER_MAP` as a Worker secret containing a JSON object that maps each explicitly verified Access email to its exact existing owner ID, for example `{"owner@example.com":"siwc:EXACT_EXISTING_OWNER_ID"}`. Keep actual mapping values private. No account or repository ownership rows change, and historical actor identities remain intact. All three values must be present together. Partial configuration fails closed; password accounts and registration are disabled whenever Access mode is configured. Remove all three only when deliberately returning to password authentication.
+Set `AVC_ACCESS_TEAM_DOMAIN` to the existing HTTPS team origin (for example `https://yourteam.cloudflareaccess.com`) and `AVC_ACCESS_AUD` to that application's audience tag. Store `AVC_ACCESS_OWNER_MAP` as a Worker secret containing a JSON object that maps each explicitly verified Access email to its exact existing owner ID, for example `{"owner@example.com":"siwc:EXACT_EXISTING_OWNER_ID"}`. Keep actual mapping values private. No account or repository ownership rows change, and historical actor identities remain intact. All three values must be present together for Access authentication. Partial configuration fails closed in Access mode. With `AVC_AUTH_MODE` omitted, any Access setting also selects Access mode; with `AVC_AUTH_MODE=password`, the retained Access settings are ignored for human authentication. Preserve them for rollback rather than deleting them to switch modes.
 
 The app validates the assertion signature against the configured team's official `/cdn-cgi/access/certs` endpoint, accepts only RS256 application tokens, verifies the exact issuer/audience and token times, and requires an explicitly mapped verified email. The JOSE `typ` header may be omitted, as specified by [RFC 7519 section 5.1](https://www.rfc-editor.org/rfc/rfc7519#section-5.1); when present, it must be `JWT`. Cloudflare can issue an otherwise valid owner token without this optional label. Key requests use Workers-supported `manual` redirect mode and reject redirect responses without following them; the pinned Workers runtime rejects the `error` mode that Node accepts. Native Workers tests exercise both assertion and cookie verification with the same deployment compatibility settings. Raw identity headers and unsigned/foreign/service tokens cannot select an owner. Signing keys are bounded and cached for ten minutes, with throttled refresh for rotation. Requests fail closed if new keys cannot be verified. Authentication failures emit only fixed reason codes, signing-key failure stages and boolean check results to private Worker logs, with each reason suppressed for 30 seconds after a warning; tokens, claims, identity values, configuration and exception details are never logged.
 
