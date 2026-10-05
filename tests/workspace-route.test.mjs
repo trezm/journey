@@ -54,7 +54,7 @@ test('repository, journey views and file names round-trip through shareable URLs
 });
 
 test('unknown or malformed paths cannot silently become another workspace', () => {
-    for (const href of ['/repositories', '/repositories/r/journeys', '/repositories/r/wat', '/repositories/r/journeys/j/settings', '/repositories/r/code/extra', '/repositories/%broken']) assert.equal(parseWorkspaceRoute(href), null, href);
+    for (const href of ['/repositories', '/repositories/r/journeys/j/changesets/c/extra', '/repositories/r/wat', '/repositories/r/journeys/j/settings', '/repositories/r/code/extra', '/repositories/%broken']) assert.equal(parseWorkspaceRoute(href), null, href);
 });
 
 test('browser Back and Forward restore repository, journey, view and exact file', () => {
@@ -124,7 +124,7 @@ test('the actual server route renders direct repository and journey URLs and rej
         '@/app/page': { default: Workspace, __esModule: true }, '@/app/settings/page': { default: RepositorySettings, __esModule: true },
         '@/lib/workspace-route': routes,
     }).default;
-    for (const view of [[], ['code'], ['live'], ['journeys', 'j'], ['journeys', 'j', 'review']]) assert.equal((await page({ params: Promise.resolve({ project: 'repo', view }) })).type, Workspace);
+    for (const view of [[], ['code'], ['live'], ['journeys'], ['journeys', 'j', 'changesets', 'c'], ['journeys', 'j'], ['journeys', 'j', 'review']]) assert.equal((await page({ params: Promise.resolve({ project: 'repo', view }) })).type, Workspace);
     assert.equal((await page({ params: Promise.resolve({ project: 'repo', view: ['settings'] }) })).type, RepositorySettings);
     await assert.rejects(page({ params: Promise.resolve({ project: 'repo', view: ['unknown'] }) }), /404/);
 });
@@ -177,4 +177,24 @@ test('repository live map links load without a journey and survive Back navigati
     assert.equal(navigation.read().journey, '');
     host.forward();
     assert.equal(navigation.read().path, 'src/worker.ts');
+});
+
+
+test('journeys index and changeset detail round trip, retaining native encoded IDs', () => {
+    for (const route of [
+        { ...homeRoute, project: 'r', tab: 'journeys' },
+        { ...homeRoute, project: 'r', journey: 'j / #', mode: 'journey', tab: 'changesets', changeset: 'c / #' },
+    ]) assert.deepEqual(parseWorkspaceRoute(workspaceHref(route)), route);
+});
+
+test('changeset scope clears on primary navigation, secondary tabs, journey switch and breadcrumb', () => {
+    for (const update of [{ journey: 'other' }, { project: 'other' }, { tab: 'code' }, { mode: 'repository' }, { changeset: undefined, tab: 'changesets' }]) {
+        const host = browser('/repositories/r/journeys/j/changesets/c'), render = hookFor(host);
+        assert.equal(render().selectedChangeset, 'c');
+        const target = render().hrefFor(update);
+        assert.equal(parseWorkspaceRoute(target).changeset, undefined);
+        render().followLink({ button: 0, preventDefault() {} }, update);
+        assert.equal(render().selectedChangeset, '');
+        host.back(); assert.equal(render().selectedChangeset, 'c');
+    }
 });

@@ -3,6 +3,7 @@
 .heading h2 { font-size: 1.4rem; margin: 8px 0; overflow-wrap: anywhere; }
 .heading p, .note { color: #64748b; font-size: .85rem; margin: 5px 0; }
 .changes { display: grid; gap: 12px; min-width: 0; }
+.changes > * { min-width: 0; }
 .detail h3 { margin: 0; font-size: 1rem; }
 .detail h3 span { margin-left: 10px; color: #64748b; font-size: .8rem; font-weight: 400; }
 .discussion { display: grid; gap: 16px; min-width: 0; }

@@ -130,10 +130,13 @@ function renderCodeWorkspace(options = {}) {
         if (name === '@/components/live-lock-map') return { LiveLockMap: props => React.createElement('section', { 'aria-label': 'Live repository map', 'data-project': props.project }) };
         if (name === '@/components/account-auth') return { AccountAuth: () => null };
         if (name === '@/components/public-repository') return { PublicRepository: () => React.createElement('section', null, 'Public accepted repository code') };
+        if (name === '@/components/changeset-detail') return { ChangesetDetail: props => React.createElement('section', null, `Changeset detail: ${props.changeset.description}`) };
+        if (name === '@/components/repository-navigation') return { RepositoryNavigation: () => null };
+        if (name === '@/components/journeys-index') return { JourneysIndex: () => React.createElement('section', null, 'Journeys index') };
         if (name === '@/components/journey-sidebar') return { JourneySidebar: () => null };
         if (name === '@/components/git-sync-warning') return { GitSyncWarning: () => null };
         if (name === '@/components/cli-install') return { CliInstall: () => null };
-        if (name === '@/hooks/use-workspace-route') return { useWorkspaceRoute: () => ({ project: 'repo', selected: options.selected ?? '', tab: options.tab ?? 'code', modeChoice: { project: 'repo', mode: options.mode ?? 'repository' }, pathChoice: { project: 'repo', path: 'README.md' }, setProject: () => {}, setSelected: () => {}, setTab: () => {}, setModeChoice: () => {}, setPathChoice: () => {}, hrefFor: () => '/repositories/repo', followLink: () => {} }) };
+        if (name === '@/hooks/use-workspace-route') return { useWorkspaceRoute: () => ({ project: 'repo', selected: options.selected ?? '', selectedChangeset: options.selectedChangeset ?? '', tab: options.tab ?? 'code', modeChoice: { project: 'repo', mode: options.mode ?? 'repository' }, pathChoice: { project: 'repo', path: 'README.md' }, setProject: () => {}, setSelected: () => {}, setTab: () => {}, setModeChoice: () => {}, setPathChoice: () => {}, hrefFor: () => '/repositories/repo', followLink: () => {} }) };
         if (name === '@/lib/repository-code') return { codeRevision, codePath, repositorySelection };
         if (name === '@/lib/avc/review') return reviewHelpers;
         if (name === '@/lib/avc/core') return { isCanonicalUpdate };
@@ -258,4 +261,19 @@ test('another account and anonymous visitors receive the public browser without 
         assert.match(html, /Public accepted repository code/);
         assert.doesNotMatch(html, /New journey|Create agent token|Download connection|Repository settings|Sign out/);
     }
+});
+
+
+test('dedicated journey and changeset pages never substitute a missing changeset or show full patches in overview', () => {
+    const journey = { id: 'j', title: 'Feature', head: 'head', base: 'base', status: 'working', created: 0, changesets: [{ id: 'c', description: 'Implementation step', patches: [] }], reviews: [], manifest: [] };
+    const detail = renderCodeWorkspace({ journeys: [journey], selected: 'j', selectedChangeset: 'c', tab: 'changesets' });
+    assert.match(detail, /Changeset detail: Implementation step/);
+    assert.doesNotMatch(detail, /Recorded changesets/);
+    const missing = renderCodeWorkspace({ journeys: [journey], selected: 'j', selectedChangeset: 'missing', tab: 'changesets' });
+    assert.match(missing, /Changeset not found/);
+    assert.doesNotMatch(missing, /Recorded changesets/);
+    const overview = renderCodeWorkspace({ journeys: [journey], selected: 'j', tab: 'changesets' });
+    assert.match(overview, /View changes and discussion/);
+    assert.doesNotMatch(overview, /Whole journeys integrate|Every step stays recorded/);
+    assert.match(renderCodeWorkspace({ tab: 'journeys' }), /Journeys index/);
 });

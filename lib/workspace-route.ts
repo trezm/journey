@@ -1,4 +1,4 @@
-export type WorkspaceTab = 'changesets' | 'code' | 'live' | 'locks' | 'inbox' | 'review' | 'agents' | 'recording';
+export type WorkspaceTab = 'journeys' | 'changesets' | 'code' | 'live' | 'locks' | 'inbox' | 'review' | 'agents' | 'recording';
 export type WorkspaceRoute = {
     project: string;
     journey: string;
@@ -6,6 +6,7 @@ export type WorkspaceRoute = {
     mode: 'repository' | 'journey';
     path: string;
     settings?: boolean;
+    changeset?: string;
 };
 export const homeRoute: WorkspaceRoute = { project: '', journey: '', tab: 'code', mode: 'repository', path: '' };
 const tabs: readonly string[] = ['changesets', 'code', 'live', 'locks', 'inbox', 'review', 'agents', 'recording'];
@@ -23,12 +24,13 @@ export function parseWorkspaceRoute(href: string): WorkspaceRoute | null {
     const route: WorkspaceRoute = { ...homeRoute, project: parts[1], path: url.searchParams.get('file') ?? '' };
     let view = parts.slice(2);
     if (view[0] === 'journeys') {
-        if (!view[1]) return null;
+        if (!view[1]) return { ...route, tab: 'journeys' };
         route.journey = view[1];
         route.mode = url.searchParams.get('mode') === 'repository' ? 'repository' : 'journey';
         route.tab = 'changesets';
         view = view.slice(2);
     }
+    if (route.journey && view[0] === 'changesets' && view.length === 2 && view[1]) return { ...route, changeset: view[1] };
     if (view.length > 1) return null;
     if (view[0] === 'settings' && !route.journey) route.settings = true;
     else if (view[0]) {
@@ -42,7 +44,9 @@ export function workspaceHref(route: WorkspaceRoute): string {
     if (!route.project) return '/';
     let path = `/repositories/${encodeURIComponent(route.project)}`;
     if (route.settings) return `${path}/settings`;
+    if (route.tab === 'journeys') return `${path}/journeys`;
     if (route.journey) path += `/journeys/${encodeURIComponent(route.journey)}`;
+    if (route.journey && route.changeset && route.tab === 'changesets') return `${path}/changesets/${encodeURIComponent(route.changeset)}`;
     if (route.tab !== (route.journey ? 'changesets' : 'code')) path += `/${route.tab}`;
     const query = new URLSearchParams();
     if (route.journey && route.mode === 'repository' && route.tab === 'code') query.set('mode', 'repository');
@@ -74,10 +78,16 @@ export class WorkspaceNavigation {
         };
     };
     navigate = (update: Partial<WorkspaceRoute>, replace = false) => {
-        const next = workspaceHref({ ...this.read(), settings: false, ...update });
+        const next = workspaceHref(nextWorkspaceRoute(this.read(), update));
         if (next === this.snapshot()) return;
         // Preserve framework history metadata so client navigation and Back agree.
         this.host.history[replace ? 'replaceState' : 'pushState'](this.host.history.state, '', next);
         this.emit();
     };
+}
+
+/** Leaving a detail scope must never carry its selected changeset into another page. */
+export function nextWorkspaceRoute(current: WorkspaceRoute, update: Partial<WorkspaceRoute>): WorkspaceRoute {
+    const leaving = ['project', 'journey', 'tab', 'mode'].some(key => key in update && update[key as keyof WorkspaceRoute] !== current[key as keyof WorkspaceRoute]);
+    return { ...current, settings: false, ...(leaving ? { changeset: undefined } : {}), ...update };
 }

@@ -1,6 +1,6 @@
 'use client';
 import { useCallback, useSyncExternalStore } from 'react';
-import { homeRoute, parseWorkspaceRoute, workspaceHref, WorkspaceNavigation, type WorkspaceRoute, type WorkspaceTab } from '@/lib/workspace-route';
+import { homeRoute, nextWorkspaceRoute, parseWorkspaceRoute, workspaceHref, WorkspaceNavigation, type WorkspaceRoute, type WorkspaceTab } from '@/lib/workspace-route';
 
 let navigation: WorkspaceNavigation | undefined;
 const store = () => navigation ??= new WorkspaceNavigation(window);
@@ -21,17 +21,17 @@ export function useWorkspaceRoute() {
         if (journey === store().read().journey) return;
         store().navigate({ journey, tab: journey ? 'changesets' : 'code', mode: journey ? 'journey' : 'repository', path: '' });
     }, []);
-    const setTab = useCallback((tab: WorkspaceTab) => store().navigate({ tab }), []);
-    const setModeChoice = useCallback(({ mode }: { project: string; mode: WorkspaceRoute['mode'] }) => store().navigate({ mode, tab: 'code' }), []);
+    const setTab = useCallback((tab: WorkspaceTab) => store().navigate({ tab, changeset: undefined }), []);
+    const setModeChoice = useCallback(({ mode }: { project: string; mode: WorkspaceRoute['mode'] }) => store().navigate({ mode, tab: 'code', changeset: undefined }), []);
     const setPathChoice = useCallback(({ path }: { project: string; path: string }) => store().navigate({ path, tab: 'code' }), []);
-    const hrefFor = (update: Partial<WorkspaceRoute>) => workspaceHref({ ...route, settings: false, ...update });
+    const hrefFor = (update: Partial<WorkspaceRoute>) => workspaceHref(nextWorkspaceRoute(route, update));
     const followLink = (event: { button: number; metaKey: boolean; ctrlKey: boolean; shiftKey: boolean; altKey: boolean; preventDefault: () => void }, update: Partial<WorkspaceRoute>) => {
         if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
         event.preventDefault();
         store().navigate(update);
     };
     return {
-        project: route.project, selected: route.journey, tab: route.tab,
+        project: route.project, selected: route.journey, selectedChangeset: route.changeset ?? '', tab: route.tab,
         modeChoice: { project: route.project, mode: route.mode }, pathChoice: { project: route.project, path: route.path },
         setProject, setSelected, setTab, setModeChoice, setPathChoice, hrefFor, followLink,
     };
