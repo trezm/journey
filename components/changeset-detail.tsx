@@ -1,0 +1,71 @@
+'use client';
+
+import { useId, useState } from 'react';
+import type { Changeset, Journey } from '@/lib/avc/core';
+import { changesetCommentTarget, changesetDiscussion, type ChangesetCommentTarget } from '@/lib/changeset-detail';
+import { PatchViewer } from './patch-viewer';
+import styles from './changeset-detail.module.css';
+
+type Props = {
+    project: string;
+    journey: Journey;
+    changeset: Changeset;
+    onComment: (target: ChangesetCommentTarget) => Promise<boolean>;
+    canComment?: boolean;
+};
+
+export function ChangesetDetail(props: Props) {
+    return <ChangesetContents key={`${props.project}:${props.journey.id}:${props.changeset.id}`} {...props}/>;
+}
+
+function ChangesetContents({ project, journey, changeset, onComment, canComment = true }: Props) {
+    const [draft, setDraft] = useState('');
+    const [pending, setPending] = useState(false);
+    const [error, setError] = useState('');
+    const inputId = useId();
+    const reviews = changesetDiscussion(journey.reviews, changeset);
+    const fileCount = new Set(changeset.patches.flatMap(patch => patch.changes.map(change => change.path))).size;
+    const number = journey.changesets.findIndex(item => item.id === changeset.id) + 1;
+    async function submit(event: React.FormEvent) {
+        event.preventDefault();
+        if (!canComment || pending || !draft.trim()) return;
+        setPending(true);
+        setError('');
+        try {
+            const saved = await onComment(changesetCommentTarget(journey, changeset, draft));
+            if (saved) setDraft('');
+            else setError('Comment was not saved. Your draft is preserved; try again.');
+        } catch (cause) {
+            setError(cause instanceof Error ? cause.message : 'Comment was not saved. Your draft is preserved; try again.');
+        } finally {
+            setPending(false);
+        }
+    }
+    return <article className={styles.detail}>
+        <header className={styles.heading}>
+            <p>Changeset {number} · {journey.status === 'working' ? 'In progress' : journey.status}</p>
+            <h2>{changeset.description}</h2>
+            <p>{journey.title} · <code>{changeset.id.slice(0, 8)}</code></p>
+        </header>
+        <section aria-label="Changeset changes" className={styles.changes}>
+            <h3>Changes <span>{changeset.patches.length} patches · {fileCount} files</span></h3>
+            <p className={styles.note}>All patches in this changeset, in publication order.</p>
+            {changeset.patches.length ? changeset.patches.map((patch, index) => <div key={patch.id} id={`patch-${patch.id}`}><PatchViewer project={project} patch={patch} number={`${number}.${index + 1}`} defaultOpen/></div>) : <p className={styles.empty}>No changes published yet.</p>}
+        </section>
+        <section aria-label="Changeset discussion" className={styles.discussion}>
+            <h3>Discussion <span>{reviews.length}</span></h3>
+            {reviews.length ? <ol className={styles.comments}>{reviews.map(review => <li key={review.id}>
+                <header><strong>{review.actor}</strong><span>{review.kind === 'approve' ? 'approved' : review.kind === 'request_changes' ? 'requested changes' : 'commented'}</span><time dateTime={new Date(review.at).toISOString()}>{new Date(review.at).toLocaleString()}</time></header>
+                {review.patch && <a href={`#patch-${review.patch}`}>Patch {changeset.patches.findIndex(patch => patch.id === review.patch) + 1}</a>}
+                <p>{review.body}</p>
+                <footer className={styles.reviewMeta}>Revision <code>{review.revision.slice(0, 7)}</code>{review.revision !== journey.head && <span>Previous revision</span>}{review.resolved && <span>Resolved</span>}</footer>
+            </li>)}</ol> : <p className={styles.empty}>No comments on this changeset yet.</p>}
+            <form onSubmit={submit} className={styles.composer}>
+                <label htmlFor={inputId}>Comment on this changeset</label>
+                <textarea id={inputId} value={draft} onChange={event => setDraft(event.target.value)} placeholder="Leave a comment…" rows={4} maxLength={4000} disabled={!canComment || pending}/>
+                {error && <p role="alert" className={styles.error}>{error}</p>}
+                <button type="submit" disabled={!canComment || pending || !draft.trim()}>{pending ? 'Posting…' : 'Comment'}</button>
+            </form>
+        </section>
+    </article>;
+}

@@ -1,0 +1,27 @@
+.detail { min-width: 0; display: grid; gap: 26px; }
+.heading { border-bottom: 1px solid #dce3ed; padding-bottom: 18px; }
+.heading h2 { font-size: 1.4rem; margin: 8px 0; overflow-wrap: anywhere; }
+.heading p, .note { color: #64748b; font-size: .85rem; margin: 5px 0; }
+.changes { display: grid; gap: 12px; min-width: 0; }
+.detail h3 { margin: 0; font-size: 1rem; }
+.detail h3 span { margin-left: 10px; color: #64748b; font-size: .8rem; font-weight: 400; }
+.discussion { display: grid; gap: 16px; min-width: 0; }
+.empty { color: #64748b; padding: 18px; background: #f6f8fa; border-radius: 6px; font-size: .85rem; }
+.comments { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; }
+.comments li { border: 1px solid #dce3ed; border-radius: 7px; overflow: hidden; }
+.comments header { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 16px; background: #f6f8fa; color: #64748b; font-size: .8rem; overflow-wrap: anywhere; }
+.comments strong { color: #334155; }
+.comments time { margin-left: auto; }
+.comments p { margin: 0; padding: 16px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.comments a { display: inline-block; margin: 12px 16px 0; font-size: .8rem; color: #2563eb; }
+.composer { display: grid; gap: 10px; }
+.composer label { font-size: .85rem; font-weight: 600; }
+.composer textarea { width: 100%; resize: vertical; padding: 12px; border: 1px solid #cbd5e1; border-radius: 6px; font: inherit; min-height: 100px; }
+.composer button { justify-self: end; padding: 8px 18px; border: 1px solid #1f753d; border-radius: 6px; background: #238636; color: white; font-weight: 600; cursor: pointer; }
+.composer button:disabled { opacity: .5; cursor: default; }
+.composer textarea:focus-visible, .composer button:focus-visible { outline: 2px solid #3269a8; outline-offset: 2px; }
+.error { color: #b42318; font-size: .85rem; }
+@media (max-width: 600px) { .comments time { margin-left: 0; width: 100%; } }
+
+.reviewMeta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 0 16px 14px; color: #64748b; font-size: .75rem; }
+.reviewMeta span { border: 1px solid #dce3ed; padding: 2px 6px; border-radius: 4px; }

@@ -13,9 +13,9 @@ import styles from './patch-viewer.module.css';
 type View = 'split' | 'unified';
 const short = (revision: string) => revision.slice(0, 7);
 
-export function PatchViewer({ project, patch, number }: { project: string; patch: Patch; number: string }) {
-    const [requested, setRequested] = useState(false);
-    return <details className={styles.patch} onToggle={event => { if (event.currentTarget.open) setRequested(true); }}>
+export function PatchViewer({ project, patch, number, defaultOpen = false }: { project: string; patch: Patch; number: string; defaultOpen?: boolean }) {
+    const [requested, setRequested] = useState(defaultOpen);
+    return <details open={defaultOpen} className={styles.patch} onToggle={event => { if (event.currentTarget.open) setRequested(true); }}>
         <summary className={styles.summary}>
             <GitCommitHorizontal size={17}/>
             <div><strong>{patch.description}</strong><span>Patch {number} · {patch.changes.length} {patch.changes.length === 1 ? 'file' : 'files'} · {new Date(patch.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></div>

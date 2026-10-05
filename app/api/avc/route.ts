@@ -8,6 +8,7 @@ export const dynamic = 'force-dynamic';
 import { submitForReview, reconciliationPlan, recordReconciliation, leaseActive, normalizePostedLocks } from '@/lib/avc/core';
 import { integrationFiles } from '@/lib/avc/integration';
 import { assertSyncWritable } from '@/lib/avc/sync';
+import { validateReviewTarget } from '@/lib/avc/review-target';
 import { liveSnapshot } from '@/lib/avc/live';
 const sample: Files = { 'src/users.rs': 'pub struct User {\n    pub id: u64,\n    pub name: String,\n}\n\npub fn find_user(id: u64) -> Option<User> {\n    if id == 1 {\n        Some(User { id, name: "Ada".into() })\n    } else {\n        None\n    }\n}\n\npub fn display_name(user: &User) -> String {\n    user.name.clone()\n}\n', 'Cargo.toml': '[package]\nname = "journey-demo"\nversion = "0.1.0"\nedition = "2021"\n\n[lib]\npath = "src/users.rs"\n', 'README.md': '# Journey demo\n\nA small Rust library for trying concurrent range locks and recorded changesets.\n\nRun cargo test locally. CI is optional.\n' };
 const field = (v: unknown, name: string, max = 4000) => { insist(typeof v === 'string' && v.trim().length > 0 && v.length <= max, 'invalid_input', `${name} is required (maximum ${max} characters).`, 400); return v.trim(); };
@@ -217,14 +218,8 @@ export async function POST(req: Request) {
                         break;
                     }
                     case 'review': {
-                        insist(j.status === 'review', 'not_in_review', 'The journey must be submitted for review.');
-                        insist(['comment', 'request_changes', 'approve'].includes(b.kind), 'invalid_review', 'Unknown review action.', 400);
+                        validateReviewTarget(j, b);
                         const authority = b.kind === 'approve' ? approvalAuthority(s, j, user, legacyRoles) : undefined;
-                        insist(b.revision === j.head, 'stale_review', 'This review targets an old revision.');
-                        if (b.changeset)
-                            insist(j.changesets.some(c => c.id === b.changeset), 'changeset_not_found', 'Invalid review anchor.', 404);
-                        if (b.patch)
-                            insist(j.changesets.some(c => c.patches.some(p => p.id === b.patch)), 'patch_not_found', 'Invalid patch anchor.', 404);
                         if (b.kind === 'approve')
                             validateSubmission(s, j);
                         const r = { id: crypto.randomUUID(), actor: user.id, body: field(b.body ?? (b.kind === 'approve' ? 'Approved' : 'Review'), 'Review text'), kind: b.kind, revision: j.head, at: Date.now(), ...(authority ? { authority } : {}), ...(b.changeset ? { changeset: b.changeset } : {}), ...(b.patch ? { patch: b.patch } : {}) };
