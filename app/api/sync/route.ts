@@ -5,8 +5,8 @@ import { ProtocolError, insist } from '@/lib/avc/core';
 import { beginSync, completeSync, configureSync, conflictSync, currentSyncRun, failSync, observeSync, oid, prepareSync, resolveSync, restartSync, stageSync, syncOwner, syncReceipt, syncRunner } from '@/lib/avc/sync';
 import { syncAncestor, syncBody, syncCommitMeta, syncTree, trustedSyncHeads, uploadSyncObjects, verifySyncClosure } from '@/lib/avc/sync-git';
 import { env } from 'cloudflare:workers';
-import { publicSync, storeCredential } from '@/lib/avc/github-cloud';
-import { githubTarget } from '@/lib/avc/github-transport';
+import { publicSync, storeCredential, storeOAuthCredential } from '@/lib/avc/github-cloud';
+import { remoteProvider } from '@/lib/avc/provider-transport';
 
 export const dynamic = 'force-dynamic';
 function field(value: unknown, name: string, max = 100): string { insist(typeof value === 'string' && value.length > 0 && value.length <= max, 'invalid_input', `${name} is required.`, 400); return value; }
@@ -45,8 +45,15 @@ export async function POST(req: Request) {
         if (['configure', 'resolve', 'reconnect', 'cancel'].includes(action)) syncOwner(user);
         let credential: string | undefined;
         if (action === 'configure' && body.hosted === true) {
-            githubTarget(field(body.remote, 'GitHub repository URL', 2000));
-            if (body.token !== undefined && body.token !== '') {
+            const provider = remoteProvider(field(body.remote, 'Git repository URL', 2000));
+            const current = (await readProject(project)).state.sync;
+            const disabling = body.enabled === false && current?.cloud && current.remote === body.remote && current.branch === body.branch;
+            if (body.oauth === true && !disabling) {
+                insist(env.GITHUB_SYNC_KEY, 'sync_credentials', 'Configure the deployment encryption secret first.', 503);
+                credential = await storeOAuthCredential(project, user.id, body.remote as string, env.GITHUB_SYNC_KEY);
+            }
+            insist(disabling || body.oauth === true || provider === 'github', 'oauth_required', 'Connect your GitLab account to enable hosted GitLab sync.', 400);
+            if (!disabling && body.oauth !== true && body.token !== undefined && body.token !== '') {
                 insist(env.GITHUB_SYNC_KEY, 'sync_credentials', 'The deployment must configure its cloud sync encryption secret first.', 503);
                 credential = await storeCredential(project, field(body.token, 'GitHub token', 500), body.remote as string, env.GITHUB_SYNC_KEY);
             }
@@ -54,10 +61,10 @@ export async function POST(req: Request) {
         let reconnectRemote: string | undefined;
         if (action === 'reconnect') {
             const current = (await readProject(project)).state.sync;
-            insist(current?.cloud, 'hosted_sync', 'This repository does not use hosted GitHub sync.', 409);
+            insist(current?.cloud, 'hosted_sync', 'This repository does not use hosted Git sync.', 409);
             insist(env.GITHUB_SYNC_KEY, 'sync_credentials', 'Configure the deployment encryption secret first.', 503);
             reconnectRemote = current.remote;
-            credential = await storeCredential(project, field(body.token, 'GitHub token', 500), current.remote, env.GITHUB_SYNC_KEY);
+            credential = body.oauth === true ? await storeOAuthCredential(project, user.id, current.remote, env.GITHUB_SYNC_KEY) : await storeCredential(project, field(body.token, 'GitHub token', 500), current.remote, env.GITHUB_SYNC_KEY);
         }
         const git = new GitStore(bindings().bucket, project);
         const result = await mutate(project, async state => {
@@ -68,7 +75,7 @@ export async function POST(req: Request) {
                 return { reconnected: true };
             }
             if (action === 'cancel') {
-                insist(state.sync?.cloud, 'hosted_sync', 'This repository does not use hosted GitHub sync.', 409);
+                insist(state.sync?.cloud, 'hosted_sync', 'This repository does not use hosted Git sync.', 409);
                 const lease = state.sync.cloud.lease;
                 insist(!lease || lease.until + 40_000 < Date.now(), 'sync_running', 'Wait for the active cloud execution to finish before cancelling.', 409);
                 state.sync.cloud.generation = crypto.randomUUID(); delete state.sync.cloud.lease; delete state.sync.cloud.work; delete state.sync.run;
@@ -79,12 +86,12 @@ export async function POST(req: Request) {
                 if (body.hosted !== true) { insist(!state.sync?.cloud, 'hosted_sync', 'Hosted sync configuration must retain its hosted mode.', 409); return configureSync(state, { remote: body.remote, branch: body.branch, enabled: body.enabled }, user); }
                 const previous = state.sync, same = previous?.remote === body.remote && previous?.branch === body.branch;
                 const selected = credential ?? (same ? previous?.cloud?.credential : undefined);
-                insist(body.enabled === false || selected, 'sync_credentials', 'Connect a repository-scoped GitHub token before enabling hosted sync.', 400);
+                insist(body.enabled === false || selected, 'sync_credentials', 'Connect your provider account before enabling hosted sync.', 400);
                 const configured = configureSync(state, { remote: body.remote, branch: body.branch, enabled: body.enabled }, user);
                 if (selected) configured.cloud = { credential: selected, generation: crypto.randomUUID() };
                 return { configured: true };
             }
-            if (state.sync?.cloud && action !== 'resolve') throw new ProtocolError('hosted_sync', 'This repository uses hosted GitHub sync; local runner actions are disabled.', 409);
+            if (state.sync?.cloud && action !== 'resolve') throw new ProtocolError('hosted_sync', 'This repository uses hosted Git sync; local runner actions are disabled.', 409);
             if (action === 'begin') return beginSync(state, { runId: body.runId, expectedHead: body.expectedHead, remoteHead: body.remoteHead, expectedRemote: body.expectedRemote, expectedBranch: body.expectedBranch }, user);
             if (action === 'observe') return observeSync(state, { head: body.head, expectedRemote: body.expectedRemote, expectedBranch: body.expectedBranch }, user);
             const receipt = syncReceipt(state, body.runId, user);

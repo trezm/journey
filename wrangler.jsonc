@@ -7,11 +7,32 @@
     "nodejs_compat"
   ],
   "workers_dev": true,
-  "triggers": { "crons": ["*/5 * * * *"] },
-  "secrets": { "required": ["GITHUB_SYNC_KEY"] },
+  "triggers": {
+    "crons": [
+      "*/5 * * * *"
+    ]
+  },
+  "secrets": {
+    "required": [
+      "GITHUB_SYNC_KEY"
+    ]
+  },
   "queues": {
-    "producers": [{ "binding": "GITHUB_SYNC_QUEUE", "queue": "journey-github-sync" }],
-    "consumers": [{ "queue": "journey-github-sync", "max_batch_size": 1, "max_batch_timeout": 1, "max_concurrency": 4, "max_retries": 3 }]
+    "producers": [
+      {
+        "binding": "GITHUB_SYNC_QUEUE",
+        "queue": "journey-github-sync"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "journey-github-sync",
+        "max_batch_size": 1,
+        "max_batch_timeout": 1,
+        "max_concurrency": 4,
+        "max_retries": 3
+      }
+    ]
   },
   "observability": {
     "enabled": true,
@@ -34,6 +55,9 @@
   "preview_urls": false,
   "vars": {
     "AVC_ACCESS_TEAM_DOMAIN": "mertz.cloudflareaccess.com",
-    "AVC_ACCESS_AUD": "875efad6b43955c6a936e44b379a3074a7bd71f7309e8539cda974f4d39d0681"
+    "AVC_ACCESS_AUD": "875efad6b43955c6a936e44b379a3074a7bd71f7309e8539cda974f4d39d0681",
+    "AVC_OAUTH_ORIGIN": "",
+    "AVC_GITHUB_CLIENT_ID": "",
+    "AVC_GITLAB_CLIENT_ID": ""
   }
 }

@@ -1,6 +1,7 @@
 import { deflateSync } from 'node:zlib';
 import { GitStore, object, parseTree, references } from './git.ts';
-import { GitHubTransport, githubTarget } from './github-transport.ts';
+import { providerTransport, remoteProvider } from './provider-transport.ts';
+import { connectionToken, encrypt } from './oauth.ts';
 import { emit, insist, notifyWaiters, ProtocolError, type State } from './core.ts';
 import { bindings, mutate, readProject } from './storage.ts';
 import { syncCommitMeta } from './sync-git.ts';
@@ -19,7 +20,7 @@ function secretKey(value: string) {
 }
 export async function storeCredential(project: string, token: string, remote: string, key: string) {
     insist(typeof token === 'string' && token.length >= 10 && token.length <= 500 && !/[\x00-\x20\x7f]/.test(token), 'invalid_token', 'Supply a repository-scoped GitHub access token.', 400);
-    const target = githubTarget(remote), transport = new GitHubTransport(target, token);
+    const transport = providerTransport(remote, token);
     // Authentication happens before changing configuration. Token permissions
     // still apply at every object and ref operation, including expiration.
     await transport.authorizeRepository();
@@ -28,13 +29,28 @@ export async function storeCredential(project: string, token: string, remote: st
     await bindings().bucket.put(`${project}/cloud-credentials/${credential}`, JSON.stringify({ iv: Buffer.from(iv).toString('base64'), ciphertext: Buffer.from(ciphertext).toString('base64') }));
     return credential;
 }
+export async function storeOAuthCredential(project: string, user: string, remote: string, key: string) {
+    const provider = remoteProvider(remote), token = await connectionToken(user, provider, key);
+    await providerTransport(remote, token).authorizeRepository(true);
+    const credential = crypto.randomUUID();
+    // Store a binding to the owner account, never a copy of its rotating token.
+    await bindings().bucket.put(`${project}/cloud-credentials/${credential}`, await encrypt(JSON.stringify({ oauth: true, user, provider }), `${project}:${remote}:${credential}`, key));
+    return credential;
+}
 async function credential(project: string, state: State, key: string) {
     const sync = state.sync!;
     const stored = await bindings().bucket.get(`${project}/cloud-credentials/${sync.cloud!.credential}`);
     insist(stored, 'sync_credentials', 'Reconnect this repository’s GitHub token.', 503);
     const value = JSON.parse(await stored.text()) as { iv: string; ciphertext: string };
     const plaintext = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: Buffer.from(value.iv, 'base64'), additionalData: utf8.encode(`${project}:${sync.remote}:${sync.cloud!.credential}`) }, await secretKey(key), Buffer.from(value.ciphertext, 'base64'));
-    return new TextDecoder().decode(plaintext);
+    const valueText = new TextDecoder().decode(plaintext);
+    if (valueText.startsWith('{')) {
+        const link = JSON.parse(valueText) as { oauth: boolean; user: string; provider: string };
+        const owner = await bindings().db.prepare('SELECT owner FROM projects WHERE id=?').bind(project).first<{ owner: string }>();
+        insist(link.oauth && owner?.owner === link.user && remoteProvider(sync.remote) === link.provider, 'sync_credentials', 'Reconnect this repository owner’s provider account.', 403);
+        return connectionToken(link.user, remoteProvider(sync.remote), key);
+    }
+    return valueText;
 }
 function children(type: ObjectType, body: Uint8Array, parent?: Item): Item[] {
     if (type === 'blob') return [];
@@ -74,7 +90,7 @@ async function finish(project: string, token: string, generation: string, candid
         if (previous !== candidate) {
             // Conservative invalidation avoids a repository-wide editable file
             // snapshot in this pass-through path. Workers reacquire after reconcile.
-            for (const lease of state.leases) emit(state, 'lock.invalidated', actor.id, { runId: run.id, reason: 'GitHub advanced Journey main; reacquire after reconciliation.', locks: [{ id: lease.id, generation: lease.generation, path: lease.path }] }, lease.journey, [lease.journey]);
+            for (const lease of state.leases) emit(state, 'lock.invalidated', actor.id, { runId: run.id, reason: 'Git remote advanced Journey main; reacquire after reconciliation.', locks: [{ id: lease.id, generation: lease.generation, path: lease.path }] }, lease.journey, [lease.journey]);
             state.leases = [];
             for (const journey of state.journeys) if (journey.status === 'working' || journey.status === 'review') for (const review of journey.reviews) if (review.kind === 'approve') review.resolved = true;
             state.revisions[candidate] = meta; state.head = candidate;
@@ -104,7 +120,7 @@ export async function runCloudSync(project: string, key: string) {
     try {
         let state = (await readProject(project)).state;
         const sync = state.sync!, cloud = fence(state, token, ownedGeneration), git = new GitStore(bindings().bucket, project);
-        const remote = new GitHubTransport(githubTarget(sync.remote), await credential(project, state, key), fetch, execution);
+        const remote = providerTransport(sync.remote, await credential(project, state, key), fetch, execution, `journey-objects/${project}/${cloud.generation}`, assertOwnership);
         if (!cloud.work) {
             const head = await remote.head(sync.branch);
             await mutate(project, state => {
@@ -189,7 +205,7 @@ export async function runCloudSync(project: string, key: string) {
             if (work.phase === 'publish') {
                 const candidate = work.candidate!, currentRemote = await remote.head(state.sync!.branch);
                 if (currentRemote !== candidate) {
-                    insist(currentRemote === work.remote, 'remote_head_moved', 'GitHub branch moved during synchronization. Retry captures the new head.', 409);
+                    insist(currentRemote === work.remote, 'remote_head_moved', 'Git remote branch moved during synchronization. Retry captures the new head.', 409);
                     await assertOwnership();
                     await remote.push(`refs/heads/${state.sync!.branch}`, work.remote, candidate);
                 }
@@ -212,7 +228,7 @@ export async function runCloudSync(project: string, key: string) {
                 else if (current.phase === 'remote-ancestry') { current.phase = 'journey-ancestry'; current.todo = [{ hash: current.original, type: 'commit' }]; current.seen = []; }
                 else if (current.phase === 'journey-ancestry') { current.phase = 'export'; current.preserve = true; current.todo = [{ hash: current.original, type: 'commit' }]; current.seen = []; }
                 else if (current.phase === 'export') {
-                    if (current.preserve) { conflictSync(state, run, [], 'rebase_conflict'); run.conflictPublished = true; state.sync!.error = 'Both branches changed. Merge the preserved Journey revision with GitHub, then select that resolved GitHub head.'; }
+                    if (current.preserve) { conflictSync(state, run, [], 'rebase_conflict'); run.conflictPublished = true; state.sync!.error = 'Both branches changed. Merge the preserved Journey revision with the remote branch, then select that resolved remote head.'; }
                     else { current.phase = 'publish'; current.candidate = current.original; run.prepared = true; stageSync(state, run, current.original, {}); }
                 }
             });
@@ -222,7 +238,7 @@ export async function runCloudSync(project: string, key: string) {
         await mutate(project, state => {
             const cloud = fence(state, token, ownedGeneration), sync = state.sync!;
             if (error instanceof ProtocolError && error.code === 'remote_head_moved' && sync.run?.phase !== 'resolving') { delete cloud.work; delete sync.run; sync.status = 'idle'; }
-            else { sync.status = 'error'; sync.error = error instanceof ProtocolError ? error.message : 'Cloud GitHub sync failed. Reconnect credentials or retry; both heads are preserved.'; }
+            else { sync.status = 'error'; sync.error = error instanceof ProtocolError ? error.message : 'Cloud Git sync failed. Reconnect credentials or retry; both heads are preserved.'; }
             cloud.failures = Math.min((cloud.failures ?? 0) + 1, 8); cloud.nextAttemptAt = Date.now() + Math.min(300_000 * 2 ** (cloud.failures - 1), 3_600_000);
             if (error instanceof ProtocolError && error.details !== null && typeof error.details === 'object' && 'retryAt' in error.details && typeof error.details.retryAt === 'number' && Number.isFinite(error.details.retryAt)) cloud.nextAttemptAt = Math.max(cloud.nextAttemptAt, error.details.retryAt);
         }).catch(() => undefined);

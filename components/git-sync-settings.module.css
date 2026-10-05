@@ -36,3 +36,11 @@
 .runner pre { padding:14px 16px; border-radius:6px; font-size:12px; background:#1e2b3e; color:#e7edf7; overflow-x:auto; line-height:1.7; }
 .runner .small { font-size:12px; }
 @media(max-width:650px) { .heading,.status,.fields,.runner{padding:22px 18px}.status{align-items:flex-start;flex-direction:column}.lastSync{text-align:left}.footer{padding:20px 18px;align-items:flex-start;flex-direction:column}.footer>div{width:100%}.footer>div button{flex:1}.ownerOnly{padding:14px 18px}.downloads{flex-direction:column}.downloads>*{width:100%} }
+
+.accounts { padding: 20px; border-bottom: 1px solid var(--border); }
+.accounts h3 { font-size: 15px; margin: 0 0 6px; }
+.accounts p, .accountButtons span { font-size: 13px; color: var(--muted-foreground); }
+.accountButtons { display: flex; gap: 16px; flex-wrap: wrap; margin: 16px 0; }
+.accountButtons > div { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; flex: 1; min-width: 220px; }
+.accounts label { display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
+.accounts select { padding: 10px; width: 100%; border: 1px solid var(--border); border-radius: 6px; background: var(--background); color: var(--foreground); }

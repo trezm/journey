@@ -15,13 +15,13 @@ export function githubTarget(remote: string): GitHubTarget {
     return { owner: match[1], repo: match[2] };
 }
 export async function boundedBytes(response: Response, limit = LIMIT): Promise<Uint8Array> {
-    insist(response.body, 'github_response', 'GitHub returned an empty response.', 502);
+    insist(response.body, 'github_response', 'The Git provider returned an empty response.', 502);
     const reader = response.body.getReader(), chunks: Uint8Array[] = []; let size = 0;
     try {
         while (true) {
             const chunk = await reader.read(); if (chunk.done) break;
             size += chunk.value.length;
-            insist(size <= limit, 'sync_capacity', 'A GitHub object or protocol response exceeds the 8 MB cloud transfer limit.', 413);
+            insist(size <= limit, 'sync_capacity', 'A Git object or protocol response exceeds the 8 MB cloud transfer limit.', 413);
             chunks.push(chunk.value);
         }
     } catch (error) { await reader.cancel().catch(() => undefined); throw error; }
@@ -42,24 +42,25 @@ export async function oneObjectPack(type: 'commit' | 'tree' | 'blob', body: Uint
     const pack = concatenate(encoder.encode('PACK'), new Uint8Array([0, 0, 0, 2, 0, 0, 0, 1]), new Uint8Array(header), deflateSync(body));
     return concatenate(pack, await digest(pack));
 }
-export async function readCommitPack(response: Uint8Array, expected: string): Promise<Uint8Array> {
+export async function readCommitPack(response: Uint8Array, expected: string): Promise<Uint8Array> { return readObjectPack(response, expected, 'commit'); }
+export async function readObjectPack(response: Uint8Array, expected: string, type: 'commit' | 'tree' | 'blob'): Promise<Uint8Array> {
     // We request no sideband/delta capabilities, tree:0 and depth 1. Parse only
     // the negotiated shallow/NAK packets, never scan for an arbitrary PACK marker.
     let offset = 0;
     while (decoder.decode(response.subarray(offset, offset + 4)) !== 'PACK') {
         const prefix = decoder.decode(response.subarray(offset, offset + 4));
-        insist(/^[a-f0-9]{4}$/.test(prefix), 'git_protocol', 'Malformed GitHub Git protocol response.', 502);
+        insist(/^[a-f0-9]{4}$/.test(prefix), 'git_protocol', 'Malformed Git provider Git protocol response.', 502);
         const size = parseInt(prefix, 16); offset += 4;
         if (size === 0) continue;
-        insist(size >= 4 && offset + size - 4 <= response.length, 'git_protocol', 'Truncated GitHub Git protocol response.', 502);
+        insist(size >= 4 && offset + size - 4 <= response.length, 'git_protocol', 'Truncated Git provider Git protocol response.', 502);
         const line = decoder.decode(response.subarray(offset, offset + size - 4)); offset += size - 4;
-        insist(line === 'NAK\n' || /^shallow [a-f0-9]{40}\n?$/.test(line), 'git_protocol', 'GitHub did not provide a single shallow commit.', 502);
+        insist(line === 'NAK\n' || /^shallow [a-f0-9]{40}\n?$/.test(line), 'git_protocol', 'Git provider did not provide a single filtered object.', 502);
     }
     const pack = response.subarray(offset);
-    insist(pack.length >= 33 && new DataView(pack.buffer, pack.byteOffset).getUint32(4) === 2 && new DataView(pack.buffer, pack.byteOffset).getUint32(8) === 1, 'git_protocol', 'GitHub returned an unsupported multi-object pack.', 502);
-    insist(equal(await digest(pack.subarray(0, -20)), pack.subarray(-20)), 'git_protocol', 'GitHub pack checksum mismatch.', 502);
+    insist(pack.length >= 33 && new DataView(pack.buffer, pack.byteOffset).getUint32(4) === 2 && new DataView(pack.buffer, pack.byteOffset).getUint32(8) === 1, 'git_protocol', 'Git provider returned an unsupported multi-object pack.', 502);
+    insist(equal(await digest(pack.subarray(0, -20)), pack.subarray(-20)), 'git_protocol', 'Git provider pack checksum mismatch.', 502);
     let pos = 12, byte = pack[pos++], size = byte & 15, shift = 4;
-    insist((byte >> 4 & 7) === 1, 'git_protocol', 'GitHub returned a delta or non-commit object instead of one raw commit.', 502);
+    insist((byte >> 4 & 7) === (type === 'commit' ? 1 : type === 'tree' ? 2 : 3), 'git_protocol', 'Git provider returned a delta or unexpected object instead of one raw object.', 502);
     while (byte & 128) { insist(pos < pack.length - 20 && shift <= 25, 'git_protocol', 'Invalid Git object size.', 502); byte = pack[pos++]; size += (byte & 127) * 2 ** shift; shift += 7; }
     insist(size < LIMIT, 'sync_capacity', 'Commit exceeds cloud transfer capacity.', 413);
     const compressed = pack.subarray(pos, -20), result: unknown = inflateSync(compressed, { maxOutputLength: LIMIT, info: true });
@@ -69,17 +70,17 @@ export async function readCommitPack(response: Uint8Array, expected: string): Pr
     const body = result.buffer, engine = result.engine;
     insist(body instanceof Uint8Array && engine !== null && typeof engine === 'object' && 'bytesWritten' in engine, 'git_protocol', 'Invalid inflater result.', 502);
     insist(body.length === size && engine.bytesWritten === compressed.length, 'git_protocol', 'Truncated or trailing Git pack data.', 502);
-    insist((await object('commit', body)).oid === expected, 'git_protocol', 'GitHub commit bytes do not match their SHA-1.', 502);
+    insist((await object(type, body)).oid === expected, 'git_protocol', 'Git provider object bytes do not match their SHA-1.', 502);
     return body;
 }
 export class GitHubTransport {
-    private api: string; private git: string; private token: string; private send: typeof fetch; private execution?: AbortSignal;
+    protected api: string; protected git: string; protected token: string; protected send: typeof fetch; protected execution?: AbortSignal;
     constructor(target: GitHubTarget, token: string, send: typeof fetch = fetch, execution?: AbortSignal) {
         this.token = token; this.send = send.bind(globalThis); this.execution = execution;
         this.api = `https://api.github.com/repos/${target.owner}/${target.repo}`;
         this.git = `https://github.com/${target.owner}/${target.repo}.git`;
     }
-    private async request(url: string, init: RequestInit = {}, protocol = false) {
+    protected async request(url: string, init: RequestInit = {}, protocol = false) {
         this.execution?.throwIfAborted();
         const timeout = AbortSignal.timeout(20_000);
         const response = await this.send(url, { ...init, redirect: 'manual', signal: this.execution ? AbortSignal.any([this.execution, timeout]) : timeout, headers: {
@@ -120,9 +121,13 @@ export class GitHubTransport {
         try { await (await this.request(`${this.api}/git/${type === 'commit' ? 'commits' : type === 'tree' ? 'trees' : 'blobs'}/${hash}`, { method: 'HEAD' })).body?.cancel(); return true; }
         catch (error) { if (error instanceof ProtocolError && error.status === 404) return false; throw error; }
     }
-    async authorizeRepository() {
+    async authorizeRepository(oauth = false) {
         const repository = await this.json('');
         insist(typeof repository.id === 'number' && typeof repository.full_name === 'string', 'github_auth', 'GitHub repository access could not be verified.', 403);
+        if (oauth) {
+            const permissions = repository.permissions as { push?: boolean } | undefined, owner = repository.owner as { type?: string } | undefined;
+            insist(permissions?.push === true && owner?.type === 'User' && repository.archived !== true && repository.disabled !== true, 'github_auth', 'Choose a writable personal GitHub repository.', 403);
+        }
     }
     async read(hash: string, type: 'commit' | 'tree' | 'blob'): Promise<Uint8Array> {
         insist(/^[a-f0-9]{40}$/.test(hash), 'invalid_revision', 'Invalid Git object ID.', 400);
@@ -184,10 +189,10 @@ export class GitHubTransport {
         }
         return commit.oid;
     }
-    private async sendPack(ref: string, old: string | null, next: string, pack: Uint8Array) {
+    protected async sendPack(ref: string, old: string | null, next: string, pack: Uint8Array) {
         const body = concatenate(packet(`${old ?? '0'.repeat(40)} ${next} ${ref}\0report-status\n`), encoder.encode('0000'), pack);
         const response = await this.request(this.git + '/git-receive-pack', { method: 'POST', headers: { 'Content-Type': 'application/x-git-receive-pack-request' }, body }, true);
         const result = decoder.decode(await boundedBytes(response, 1_000_000));
-        insist(result.includes('unpack ok\n') && result.includes(`ok ${ref}\n`) && !result.includes(`ng ${ref} `), 'github_push', 'GitHub refused the exact-head update. Recheck the remote head and retry safely.', 409);
+        insist(result.includes('unpack ok\n') && result.includes(`ok ${ref}\n`) && !result.includes(`ng ${ref} `), 'github_push', 'The Git remote refused the exact-head update. Recheck the remote head and retry safely.', 409);
     }
 }
