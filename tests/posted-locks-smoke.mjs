@@ -123,7 +123,7 @@ const integratePayload = (f, entry, s, tokens = entry.tokens) => ({
 });
 
 try {
-    await request('/api/auth', { action: 'register', email: `posted-locks-${crypto.randomUUID()}@example.com`, password: 'disposable-local-posted-locks-2026' });
+    await request('/api/auth', { action: 'register', username: 'test-' + crypto.randomUUID().slice(0, 24), email: `posted-locks-${crypto.randomUUID()}@example.com`, password: 'disposable-local-posted-locks-2026' });
     for (const disposition of ['unaffected', 'adapted']) {
         const f = await fixture(`Retained A/B ${disposition}`);
         const A = await proposal(f, 'A proposed first', 'a.txt', 'A accepted content\n', f.worker.token);

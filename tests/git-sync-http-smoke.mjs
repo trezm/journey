@@ -29,7 +29,7 @@ function git(args, cwd = directory, extraEnv = {}) {
     return execFileSync('git', ['-c', 'user.name=Sync Test', '-c', 'user.email=sync@example.test', '-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null', ...args], { cwd, env: { ...gitEnv, ...extraEnv }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 30000 }).trim();
 }
 try {
-    await request('/api/auth', { action: 'register', email: `sync-${crypto.randomUUID()}@example.test`, password: 'local-sync-fixture-password' });
+    await request('/api/auth', { action: 'register', username: 'test-' + crypto.randomUUID().slice(0, 24), email: `sync-${crypto.randomUUID()}@example.test`, password: 'local-sync-fixture-password' });
     const { project } = await request('/api/avc', { action: 'create_project', name: 'Git synchronization smoke', files: { 'file.txt': 'one\ntwo\nthree\n', 'other.txt': 'base\n' } });
     const act = (action, body = {}, token, status) => request('/api/avc', { action, project, requestId: crypto.randomUUID(), ...body }, token, status);
     const state = async () => (await request('/api/avc?project=' + project)).state;

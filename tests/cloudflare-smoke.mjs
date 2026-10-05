@@ -20,7 +20,7 @@ assert.equal(unauthenticated.data.user, null);
 await request('/api/avc', { headers: spoof, status: 401 });
 await request('/api/connect', { headers: spoof, body: { project: 'invalid' }, status: 401 });
 const registration = await request('/api/auth', {
-  body: { action: 'register', email: `cloudflare-${crypto.randomUUID()}@example.com`, password: 'standalone-test-password-2026' },
+  body: { action: 'register', username: 'test-' + crypto.randomUUID().slice(0, 24), email: `cloudflare-${crypto.randomUUID()}@example.com`, password: 'standalone-test-password-2026' },
 });
 const cookie = registration.response.headers.get('set-cookie').split(';')[0];
 const signedIn = await request('/api/auth', { headers: { Cookie: cookie, ...spoof } });

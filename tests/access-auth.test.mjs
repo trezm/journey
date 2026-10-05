@@ -237,7 +237,7 @@ function modules(settings, verifier) {
         queries.push(query);
         if (query.startsWith('SELECT project,name,role')) return args[0] === await crypto.subtle.digest('SHA-256', new TextEncoder().encode('valid-agent')).then(v => Buffer.from(v).toString('hex')) ? { project: 'owned-project', name: 'Worker', role: 'worker' } : null;
         if (query.startsWith('SELECT owner')) return { owner: args[0] === 'owned-project' ? ownerID : 'another-owner' };
-        if (query.startsWith('SELECT sessions')) { sessions.push(args); return { user: 'password-user', email: 'password@example.test' }; }
+        if (query.startsWith('SELECT sessions')) { sessions.push(args); return { user: 'password-user', username: 'password-user', email: 'password@example.test' }; }
         return null;
     }, run: async () => { queries.push(query); return { meta: { changes: 1 } }; } }) }) };
     class ProtocolError extends Error { constructor(code, message, status = 409) { super(message); this.code = code; this.status = status; } }
@@ -294,4 +294,14 @@ test('deployments with no Access configuration retain password-session authentic
     assert.equal((await m.auth.principal(new Request('https://journey.example.test/api/avc', { headers: { Cookie: 'avc_session=local-session' } }))).id, 'password-user');
     assert.equal(m.sessions.length, 1);
     assert.equal(await m.auth.principal(request(await jwt())), null);
+});
+
+test('explicit password mode overrides stale Access config; invalid modes remain closed', async () => {
+    const f = fixture();
+    const password = modules({ ...env, AVC_AUTH_MODE: 'password' }, f.verifier);
+    assert.equal(password.auth.authenticationMode(), 'password');
+    const current = await password.auth.principal(new Request('https://journey.example.test/api/avc', { headers: { Cookie: 'avc_session=local-session' } }));
+    assert.equal(current.name, 'password-user'); assert.equal(current.username, 'password-user');
+    assert.equal(modules({ AVC_AUTH_MODE: 'access' }, f.verifier).auth.authenticationMode(), 'access');
+    assert.equal(modules({ AVC_AUTH_MODE: 'misspelled' }, f.verifier).auth.authenticationMode(), 'access');
 });

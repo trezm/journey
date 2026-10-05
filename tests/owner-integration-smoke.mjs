@@ -16,7 +16,7 @@ async function request(path, body, credential, expected = 200, code) {
     if (code) assert.equal(data.code, code);
     return data.result ?? data;
 }
-await request('/api/auth', { action: 'register', email: `owner-integration-${crypto.randomUUID()}@example.com`, password: 'local-owner-integration-2026' });
+await request('/api/auth', { action: 'register', username: 'test-' + crypto.randomUUID().slice(0, 24), email: `owner-integration-${crypto.randomUUID()}@example.com`, password: 'local-owner-integration-2026' });
 const ownerCookie = cookie;
 const { project } = await request('/api/avc', { action: 'create_project', name: 'Owner integration regression', files: { 'file.txt': 'a\nb\nc\nd\ne\nf' } });
 const worker = await request('/api/avc', { action: 'create_agent', project, name: 'Published worker' });
@@ -61,7 +61,7 @@ await act('abandon', { journey: protectedJourney }, other.token);
 
 // An unrelated signed-in account cannot use the owner's integration authority.
 cookie = '';
-await request('/api/auth', { action: 'register', email: `stranger-integration-${crypto.randomUUID()}@example.com`, password: 'local-stranger-integration-2026' });
+await request('/api/auth', { action: 'register', username: 'test-' + crypto.randomUUID().slice(0, 24), email: `stranger-integration-${crypto.randomUUID()}@example.com`, password: 'local-stranger-integration-2026' });
 await request('/api/avc', { ...payload, requestId: crypto.randomUUID() }, null, 403, 'forbidden');
 cookie = ownerCookie;
 

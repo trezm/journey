@@ -16,7 +16,7 @@ async function request(path, body, token, expected = 200, code) {
     if (code) assert.equal(data.code, code);
     return data.result ?? data;
 }
-await request('/api/auth', { action: 'register', email: `lifecycle-${crypto.randomUUID()}@example.com`, password: 'local-lifecycle-test-2026' });
+await request('/api/auth', { action: 'register', username: 'test-' + crypto.randomUUID().slice(0, 24), email: `lifecycle-${crypto.randomUUID()}@example.com`, password: 'local-lifecycle-test-2026' });
 const { project } = await request('/api/avc', { action: 'create_project', name: 'Review lifecycle regression' });
 const agent = await request('/api/avc', { action: 'create_agent', project, name: 'Lifecycle worker' });
 const other = await request('/api/avc', { action: 'create_agent', project, name: 'Other worker' });

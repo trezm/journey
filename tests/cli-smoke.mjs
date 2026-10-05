@@ -19,7 +19,7 @@ async function run(dir, ...args) {
 }
 const children = [];
 try {
-    await request('/api/auth', { action: 'register', email: 'cli-' + crypto.randomUUID() + '@example.com', password: 'CLI-test-password-2026' });
+    await request('/api/auth', { action: 'register', username: 'test-' + crypto.randomUUID().slice(0, 24), email: 'cli-' + crypto.randomUUID() + '@example.com', password: 'CLI-test-password-2026' });
     const { project } = await request('/api/avc', { action: 'create_project', name: 'Imported CLI repository', empty: true });
     const connection = await request('/api/connect', { project }); const connectionPath = join(temp, 'download.json'); writeFileSync(connectionPath, JSON.stringify(connection));
     const downloadable = await fetch(root + '/journey.mjs'); assert.equal(downloadable.status, 200); assert((await downloadable.text()).includes('importRepo'));

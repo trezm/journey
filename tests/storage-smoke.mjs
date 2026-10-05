@@ -14,7 +14,7 @@ async function request(path, body) {
     assert.equal(response.status, 200, JSON.stringify(data));
     return data.result ?? data;
 }
-await request('/api/auth', { action: 'register', email: `storage-${crypto.randomUUID()}@example.com`, password: 'Storage-test-password-2026' });
+await request('/api/auth', { action: 'register', username: 'test-' + crypto.randomUUID().slice(0, 24), email: `storage-${crypto.randomUUID()}@example.com`, password: 'Storage-test-password-2026' });
 const paths = Array.from({ length: 20 }, (_, i) => `src/${'long-directory-name-'.repeat(8)}/file-${i}.ts`);
 const { project } = await request('/api/avc', { action: 'create_project', name: 'Receipt capacity regression', files: Object.fromEntries(paths.map(path => [path, 'before\n'])) });
 const act = (action, data = {}) => request('/api/avc', { action, project, requestId: crypto.randomUUID(), ...data });
