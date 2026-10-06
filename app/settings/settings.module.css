@@ -31,3 +31,20 @@
 .loading { padding:30px 0; }
 .recovery { display:inline-block; color:#b45330; font-size:14px; margin-top:8px; }
 @media(max-width:650px) { .row:has(>select){flex-direction:column}.row:has(>select)>.copy,.row>select{width:100%}.header{padding:18px 20px}.content{padding:28px 18px 50px}.cardHeading,.row{padding:22px 18px}.icon{display:none}.row{gap:14px}.footer{padding:20px 18px;align-items:flex-start;flex-direction:column}.footer>div{width:100%}.footer>div button{flex:1}.heading h1{font-size:25px}.back{font-size:12px} }
+
+:global(.dark) .page { background: var(--background); color: var(--foreground); }
+:global(.dark) .header { background: #141f30; border-color: var(--border); }
+:global(.dark) .brand { color: var(--foreground); }
+:global(.dark) .back { color: #b4c1d3; }
+:global(.dark) .back:hover,:global(.dark) .recovery:hover { color: #ff9b75; }
+:global(.dark) .heading p,:global(.dark) .copy p,:global(.dark) .footer p { color: var(--muted-foreground); }
+:global(.dark) .eyebrow { color: #a1afc3; }
+:global(.dark) .card { background: var(--card); border-color: var(--border); }
+:global(.dark) .cardHeading,:global(.dark) .footer { background: #1d2a3e; border-color: var(--border); }
+:global(.dark) .row { border-color: var(--border); }
+:global(.dark) .icon { background: #263449; color: #b5c2d5; }
+:global(.dark) .row>select { background: #182335; color: var(--foreground); border-color: var(--input); }
+:global(.dark) .ownerOnly { color: #f0bd7d; background: #3d3025; }
+:global(.dark) .error { color: #ffb4bc; background: #3d252c; border-color: #69343d; }
+:global(.dark) .success { color: #a8e2c4; background: #203f35; border-color: #315f4c; }
+:global(.dark) .recovery { color: #ff9b75; }

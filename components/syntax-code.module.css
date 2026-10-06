@@ -39,3 +39,15 @@ span.syntax span {
 @media (forced-colors: active) {
     .input { color: CanvasText; background: Canvas; }
 }
+
+:global(.dark) .syntax :global(.hljs-comment),:global(.dark) .syntax :global(.hljs-quote) { color: #9aa8bc; }
+:global(.dark) .syntax :global(.hljs-keyword),:global(.dark) .syntax :global(.hljs-selector-tag),:global(.dark) .syntax :global(.hljs-deletion) { color: #ff7b72; }
+:global(.dark) .syntax :global(.hljs-string),:global(.dark) .syntax :global(.hljs-regexp),:global(.dark) .syntax :global(.hljs-doctag) { color: #a5d6ff; }
+:global(.dark) .syntax :global(.hljs-number),:global(.dark) .syntax :global(.hljs-literal),:global(.dark) .syntax :global(.hljs-symbol),:global(.dark) .syntax :global(.hljs-bullet),:global(.dark) .syntax :global(.hljs-attr),:global(.dark) .syntax :global(.hljs-attribute),:global(.dark) .syntax :global(.hljs-variable),:global(.dark) .syntax :global(.hljs-template-variable),:global(.dark) .syntax :global(.hljs-meta),:global(.dark) .syntax :global(.hljs-link) { color: #79c0ff; }
+:global(.dark) .syntax :global(.hljs-title),:global(.dark) .syntax :global(.hljs-section) { color: #d2a8ff; }
+:global(.dark) .syntax :global(.hljs-type),:global(.dark) .syntax :global(.hljs-built_in) { color: #ffa657; }
+:global(.dark) .syntax :global(.hljs-tag),:global(.dark) .syntax :global(.hljs-name),:global(.dark) .syntax :global(.hljs-selector-class),:global(.dark) .syntax :global(.hljs-selector-id),:global(.dark) .syntax :global(.hljs-addition) { color: #7ee787; }
+:global(.dark) .source { background: #101a2a; color: #e6edf7; }
+:global(.dark) .language,:global(.dark) .viewport { border-color: #344258; color: #b4c1d3; }
+:global(.dark) .numbers { background: #182335; border-color: #344258; color: #9aa8bc; }
+:global(.dark) .input { caret-color: #e6edf7; }

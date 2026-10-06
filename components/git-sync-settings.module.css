@@ -37,6 +37,20 @@
 .runner .small { font-size:12px; }
 @media(max-width:650px) { .heading,.status,.fields,.runner{padding:22px 18px}.status{align-items:flex-start;flex-direction:column}.lastSync{text-align:left}.footer{padding:20px 18px;align-items:flex-start;flex-direction:column}.footer>div{width:100%}.footer>div button{flex:1}.ownerOnly{padding:14px 18px}.downloads{flex-direction:column}.downloads>*{width:100%} }
 
+:global(.dark) .card,:global(.dark) .runner { background: var(--card); border-color: var(--border); }
+:global(.dark) .heading { background: #1d2a3e; border-color: var(--border); }
+:global(.dark) .status { background: #202d40; border-color: var(--border); }
+:global(.dark) .status strong { color: #d5dfec; }
+:global(.dark) .statusLabel,:global(.dark) .lastSync,:global(.dark) .fields label>span { color: #a3b1c5; }
+:global(.dark) .lastSync span { color: #e5bd7d; }
+:global(.dark) .fields input { background: #182335; border-color: #3a4960; color: #e6edf7; }
+:global(.dark) .fields input:disabled { background: #202d40; color: #a3b1c5; }
+:global(.dark) .toggle { border-color: var(--border); }
+:global(.dark) .footer { background: #1d2a3e; border-color: var(--border); }
+:global(.dark) .ownerOnly { color: #f0bd7d; background: #3d3025; }
+:global(.dark) .error { color: #ffb4bc; background: #3d252c; border-color: #69343d; }
+:global(.dark) .notice { color: #a8e2c4; background: #203f35; border-color: #315f4c; }
+
 .accounts { padding: 20px; border-bottom: 1px solid var(--border); }
 .accounts h3 { font-size: 15px; margin: 0 0 6px; }
 .accounts p, .accountButtons span { font-size: 13px; color: var(--muted-foreground); }

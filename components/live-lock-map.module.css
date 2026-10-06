@@ -104,3 +104,54 @@
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spinning { animation: none; } .edgePulse { display: none; animation: none; } }
 @media (max-width: 700px) { .metrics { grid-template-columns: repeat(2, 1fr); gap: 15px; } .metrics > div:nth-child(3) { border-left: 0; padding-left: 0; } .inspectorGrid { grid-template-columns: 1fr; gap: 18px; } .toolbar { align-items: flex-start; flex-wrap: wrap; } .filterBar { gap: 10px; } .search { max-width: none; } .graphViewport { max-height: 520px; } }
+
+:global(.dark) .root { --map-blue:#66a9ff; --map-yellow:#e9bc55; --map-red:#f07882; background:var(--card); border-color:var(--border); box-shadow:0 5px 18px #0003; color:var(--foreground); }
+:global(.dark) .root button:focus-visible,:global(.dark) .graphNode:focus-visible,:global(.dark) .graphViewport:focus-visible { outline-color:#8ab4ff; }
+:global(.dark) .toolbar,:global(.dark) .inspector { border-color:var(--border); }
+:global(.dark) .toolbar h2,:global(.dark) .metrics strong { color:#e6edf7; }
+:global(.dark) .liveStatus,:global(.dark) .metrics span,:global(.dark) .listHeading,:global(.dark) .pager,:global(.dark) .graphToolbar,:global(.dark) .graphNote,:global(.dark) .inspectorGrid p,:global(.dark) .footnote { color:#a3b1c5; }
+:global(.dark) .liveStatus strong { color:#a8e2c4; }
+:global(.dark) .paused { background:#8392a8; }
+:global(.dark) .controls button,:global(.dark) .pager button { background:#202d40; border-color:#3a4960; color:#d0dbea; }
+:global(.dark) .controls button:hover,:global(.dark) .pager button:hover { background:#2b3b52; }
+:global(.dark) .metrics > div { border-color:#344258; }
+:global(.dark) .metrics svg { color:#a3b1c5; }
+:global(.dark) .metrics .hotMetric strong,:global(.dark) .metrics .hotMetric svg { color:#ff9da6; }
+:global(.dark) .viewSwitch { background:#202d40; border-color:#3a4960; }
+:global(.dark) .viewSwitch button { color:#b4c1d3; }
+:global(.dark) .viewSwitch button[aria-pressed="true"] { background:#34445c; color:#f0f4fb; box-shadow:0 1px 4px #0005; }
+:global(.dark) .search { border-color:#3a4960; color:#a3b1c5; }
+:global(.dark) .search:focus-within { border-color:#8ab4ff; outline-color:#8ab4ff; }
+:global(.dark) .checkbox { color:#c1ccdb; }
+:global(.dark) .listHeading,:global(.dark) .fileTable th,:global(.dark) .pager,:global(.dark) .graphToolbar,:global(.dark) .graphNote,:global(.dark) .footnote,:global(.dark) .empty { background:#202d40; }
+:global(.dark) .listHeading,:global(.dark) .fileTable th,:global(.dark) .pager,:global(.dark) .graphToolbar,:global(.dark) .graphNote,:global(.dark) .footnote { border-color:#344258; }
+:global(.dark) .fileTable th { color:#b7c4d7; }
+:global(.dark) .fileTable td { color:#d4deeb; border-color:#2e3c51; }
+:global(.dark) .fileTable tbody tr:hover { background:#202d40; }
+:global(.dark) .fileButton { color:#bdcadd; }
+:global(.dark) .fileButton strong { color:#e0e7f1; }
+:global(.dark) .fileButton small { color:#a3b1c5; }
+:global(.dark) .conflictBadge { background:#482932; color:#ffadb5; }
+:global(.dark) .neutralCount { color:#a3b1c5; }
+:global(.dark) .graphViewport { background-color:#111c2e; background-image:radial-gradient(#60738c70 .75px,transparent .75px); }
+:global(.dark) .edge { stroke:#72839b; }
+:global(.dark) .conflictEdge { stroke:#f07882; }
+:global(.dark) .edgePulse { stroke:#66a9ff; }
+:global(.dark) .graphNode rect { fill:#1d2a3e; stroke:#54647b; }
+:global(.dark) .changesetNode rect { fill:#243853; stroke:#6f91bb; }
+:global(.dark) .graphNode text { fill:#e0e8f2; }
+:global(.dark) .graphNode .nodeDetail { fill:#b0bfd3; }
+:global(.dark) .conflictNode rect { stroke:#c6737e; }
+:global(.dark) .graphNode:hover rect,:global(.dark) .graphNode:focus-visible rect,:global(.dark) .selectedNode rect { stroke:#8ab4ff; fill:#2b405c; }
+:global(.dark) .inspector { background:#182335; }
+:global(.dark) .inspectorHint,:global(.dark) .inspectorHint p,:global(.dark) .inspectorGrid p,:global(.dark) .inspectorGrid h4,:global(.dark) .eyebrow { color:#a3b1c5; }
+:global(.dark) .inspectorHint strong,:global(.dark) .inspectorHeading h3 { color:#e0e8f2; }
+:global(.dark) .inspectorHeading > button { color:#bdcadd; }
+:global(.dark) .inspectorSummary a { color:#ff9b75; }
+:global(.dark) .regionRow,:global(.dark) .relatedList button,:global(.dark) .affectedFiles button { color:#bdcadd; }
+:global(.dark) .regionRow small,:global(.dark) .relatedList button small { color:#a3b1c5; }
+:global(.dark) .selectedRow,:global(.dark) .relatedList button:hover,:global(.dark) .affectedFiles button:hover { background:#26364d; color:#e6edf7; }
+:global(.dark) .relatedList button,:global(.dark) .affectedFiles button { border-color:#344258; }
+:global(.dark) .empty { color:#b2bfd1; }
+:global(.dark) .empty h3 { color:#d0dbea; }
+:global(.dark) .error { background:#3d252c; border-color:#69343d; color:#ffb4bc; }

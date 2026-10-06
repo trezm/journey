@@ -64,3 +64,33 @@
 .lineComposer textarea:focus-visible, .lineComposer button:focus-visible { outline: 2px solid #3269a8; outline-offset: 2px; }
 .srOnly { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border-width: 0; }
 @media (max-width: 700px) { .summary { padding: 15px; } .summary > code { display: none; } .toolbar { padding: 10px; } .fileToggle { flex-basis: 100%; } .viewedLabel { margin-left: auto; } .reviewProgress { margin-left: 0; } }
+
+:global(.dark) .patch { border-color: var(--border); }
+:global(.dark) .summary > svg { color: #a3b1c5; }
+:global(.dark) .summary span,:global(.dark) .summary code { color: var(--muted-foreground); }
+:global(.dark) .contents,:global(.dark) .file { border-color: var(--border); }
+:global(.dark) .toolbar,:global(.dark) .diff th,:global(.dark) .fileNote { background: var(--muted); }
+:global(.dark) .revisions,:global(.dark) .reviewProgress,:global(.dark) .fileNote { color: var(--muted-foreground); }
+:global(.dark) .viewToggle { border-color: var(--border); }
+:global(.dark) .viewToggle button { background: var(--card); color: var(--secondary-foreground); }
+:global(.dark) .viewToggle button + button,:global(.dark) .diff th + th,:global(.dark) .split td:nth-child(3) { border-color: var(--border); }
+:global(.dark) .viewToggle button[aria-pressed=true] { background: var(--accent); color: var(--accent-foreground); }
+:global(.dark) .viewToggle button:focus-visible,:global(.dark) .summary:focus-visible,:global(.dark) .scroll:focus-visible,:global(.dark) .fileToggle:focus-visible,:global(.dark) .viewedLabel input:focus-visible,:global(.dark) .lineComposer textarea:focus-visible,:global(.dark) .lineComposer button:focus-visible { outline-color: var(--ring); }
+:global(.dark) .fileHeading { background: var(--card); }
+:global(.dark) .fileToggle { color: var(--foreground); }
+:global(.dark) .fileToggle svg { color: var(--muted-foreground); }
+:global(.dark) .viewedLabel { border-color: var(--border); background: var(--secondary); color: var(--secondary-foreground); }
+:global(.dark) .fileViewed .viewedLabel { border-color: #315f4c; background: #203f35; color: #a8e2c4; }
+:global(.dark) .fileHeading > span { color: var(--muted-foreground); }
+:global(.dark) .fileHeading > .addedCount { color: #a6e1c0; }
+:global(.dark) .fileHeading > .removedCount { color: #ff9b9b; }
+:global(.dark) .diff th { color: var(--muted-foreground); border-color: var(--border); }
+:global(.dark) .diff td.number { color: #9aa8bc; }
+:global(.dark) .diff td.code { color: var(--foreground); }
+:global(.dark) .diff .context { background: var(--card); }
+:global(.dark) .diff .removed { background: #482b34; }
+:global(.dark) .diff .added { background: #214436; }
+:global(.dark) .diff .blank { background: #202d40; }
+:global(.dark) .diff .hunk td { color: #c3cfdf; background: #27364b; }
+:global(.dark) .message { color: var(--muted-foreground); }
+:global(.dark) .message button { border-color: var(--border); background: var(--card); color: var(--foreground); }

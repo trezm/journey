@@ -1,0 +1,28 @@
+.switch {
+    position: fixed;
+    z-index: 50;
+    flex-direction: row;
+    right: 20px;
+    bottom: 18px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 38px;
+    padding: 0 13px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    color: var(--foreground);
+    background: var(--card);
+    box-shadow: 0 5px 18px rgb(16 27 45 / 14%);
+    font-size: .8125rem;
+    font-weight: 550;
+}
+
+.switch:hover { background: var(--accent); }
+.switch:focus-within { outline: 2px solid var(--ring); outline-offset: 3px; }
+.label { color: var(--muted-foreground); }
+.switch select { width: auto; padding: 0 18px 0 0; border: 0; background: transparent; color: inherit; font-size: inherit; font-weight: 600; cursor: pointer; }
+
+@media (max-width: 700px) {
+    .switch { right: 12px; bottom: 12px; }
+}

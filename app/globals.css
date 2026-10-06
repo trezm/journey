@@ -50,3 +50,88 @@
 @media(max-width:700px){.repository-shell .sidebar{padding:14px 18px;gap:12px;flex-wrap:wrap}.repository-shell .repository-picker{max-width:none;width:auto;flex:1}.repository-shell .sidebar>.sidebar-link{display:none}.repository-shell .sidebar-bottom{margin-left:auto}.repository-shell .account>span:not(.avatar){display:none}.repository-shell .repository-heading{margin-bottom:12px}.repository-primary{gap:20px}.journeys-filters{flex-wrap:wrap}.journeys-filters label{min-width:100%}.journeys-row{flex-wrap:wrap}.journeys-row .status{margin-left:34px}.source-workspace{grid-template-columns:1fr}.source-tree{max-height:220px;border-right:0;border-bottom:1px solid var(--border)}.repository-shell .breadcrumb .slash,.repository-shell .breadcrumb strong{display:none}}
 .repository-shell .sidebar>[aria-label="Repository"]{width:260px;flex:0 1 260px;min-width:150px;margin:0}.repository-shell .sidebar>.sidebar-link{flex-shrink:0}.repository-shell .sidebar-bottom{border:0;flex-shrink:0}.repository-shell .account{flex-shrink:0;white-space:nowrap}.repository-shell .account strong{max-width:180px}.repository-shell .account small{white-space:nowrap}
 @media(max-width:700px){.repository-shell .sidebar>[aria-label="Repository"]{flex:1 1 170px;width:auto;min-width:0}.repository-shell .sidebar-bottom{flex:0 0 auto}.repository-shell .sidebar .wordmark{font-size:1.1rem;gap:6px}.repository-shell .sidebar{gap:10px}.repository-shell .account .avatar{display:none}}
+
+/* Dark theme uses the same semantic surfaces and contrast roles throughout the app. */
+.dark{color-scheme:dark;--background:#111827;--foreground:#e6edf7;--card:#182335;--card-foreground:#e6edf7;--popover:#1d2a3e;--popover-foreground:#e6edf7;--primary:#f0784d;--primary-foreground:#25130d;--secondary:#263449;--secondary-foreground:#e6edf7;--muted:#202d40;--muted-foreground:#a3b1c5;--accent:#27364b;--accent-foreground:#f1f5fb;--destructive:#f87171;--border:#344258;--input:#3a4960;--ring:#f0784d}
+.dark body{background:#111827;color:#e6edf7}
+.dark p{color:#a3b1c5}
+.dark input,.dark select,.dark textarea{background:#182335;border-color:#3a4960;color:#e6edf7}
+.dark input::placeholder,.dark textarea::placeholder{color:#9aa9bd}
+.dark select option{background:#182335;color:#e6edf7}
+.dark .topbar,.dark .overview-strip,.dark .changeset-card,.dark .panel,.dark .code-panel,.dark .journeys-index,.dark .empty-panel{background:#182335;border-color:#344258;color:#e6edf7}
+.dark .topbar{border-bottom-color:#344258}
+.dark .breadcrumb,.dark .breadcrumb strong,.dark .journey-summary dd,.dark .journey-summary dl,.dark .declared,.dark .journey-heading h2{color:#d7e0ed}
+.dark .overview-strip>div,.dark .tabs,.dark .journey-heading,.dark .summary-divider{border-color:#344258}
+.dark .overview-strip span,.dark .section-heading span,.dark .section-heading p,.dark .panel>p,.dark .side-note p,.dark .cell-small,.dark th,.dark .review-comment p{color:#a3b1c5}
+.dark .status{background:#4a3029;color:#ffb493}
+.dark .status.review{background:#29375a;color:#b8c8ff}
+.dark .status.integrated{background:#203f35;color:#a8e2c4}
+.dark .status.abandoned{background:#303b4d;color:#c1cada}
+.dark .chip{background:#1d2a3e;border-color:#344258;color:#b7c4d8}
+.dark .chip b{color:#e6edf7}
+.dark .chip.subtle,.dark .changeset-foot,.dark th,.dark .journeys-row:hover,.dark .journeys-filters,.dark .policy,.dark .credential,.dark .manifest-entry,.dark .event-breaking{background:#202d40}
+.dark .overview-strip strong,.dark .changeset-head h3,.dark .patch strong,.dark td,.dark td strong,.dark .section-heading h2,.dark .panel h3,.dark .journeys-row h3,.dark .event strong,.dark .review-comment strong{color:#e6edf7}
+.dark .tabs{border-bottom-color:#344258}
+.dark .tabs button,.dark .repository-primary a,.dark .repository-tabs a,.dark .repository-view-toggle a,.dark .journeys-pagination,.dark .journeys-row{color:#a3b1c5}
+.dark .tabs button.active,.dark .repository-primary a.active,.dark .repository-tabs a.active,.dark .repository-view-toggle a.active{color:#ff9b75}
+.dark .count{background:#51342c;color:#ffc4aa}
+.dark .timeline{border-color:#394961}
+.dark .timeline-node{background:#202d40;border-color:#44556e;color:#c3cfdf}
+.dark .patch,.dark .patch-diff,.dark .changeset-foot,.dark .breaking-item,.dark .waiting,.dark .review-comment,.dark .recording-entry,.dark td,.dark .endpoint,.dark .reconcile-list>div{border-color:#344258}
+.dark .patch summary>svg:first-child,.dark .patch span,.dark .patch code,.dark .journey-summary dl,.dark .summary-divider{color:#a3b1c5}
+.dark .patch-diff,.dark .hunk-label,.dark .editor-context,.dark .event-icon,.dark .review-hash,.dark .source-tree button[aria-current],.dark .repository-view-toggle a.active{background:#202d40;color:#c4d0e1}
+.dark .hunk-label{background:#27364b}
+.dark .added{background:#214436;color:#a6e1c0}
+.dark .changeset-foot{color:#a3b1c5}
+.dark .journey-summary .declared,.dark .checklist li{color:#9fdbb9}
+.dark .lease-time{color:#e5bd7d}
+.dark .editor-toolbar .mono,.dark .editor-toolbar .file-picker select{color:#b8c5d8}
+.dark .editor-context{border-color:#344258}
+.dark table{color:#d9e2ef}
+.dark th{border-color:#344258}
+.dark td{border-bottom-color:#2d3b50}
+.dark .event-icon{background:#263449;color:#b5c2d5}
+.dark .event-icon.accepted{background:#203f35;color:#a8e2c4}
+.dark .review-empty{border-color:#43536b;color:#a3b1c5}
+.dark .integrate-button:disabled{background:#303b4d!important;color:#9aa8bc}
+.dark .workflow-list,.dark .journeys-pagination,.dark .journeys-row small{color:#a3b1c5}
+.dark .journeys-row{border-color:#344258}
+.dark .journeys-row>svg,.dark .journeys-row small{color:#a3b1c5}
+.dark .journeys-pagination button{background:#202d40;color:#d8e2f0;border-color:#3a4960}
+.dark .source-tree{border-color:#344258}
+.dark .source-tree button:hover,.dark .source-tree button[aria-current],.dark .repository-view-toggle a.active{background:#29374d;color:#f0f4fb}
+.dark .repository-primary,.dark .repository-tabs{border-color:#344258}
+.dark .repository-view-toggle a{color:#a3b1c5}
+.dark .source-tree summary{color:#c2cede}
+.dark .source-tree button{color:#bcc9da}
+.dark .banner.error{color:#ffb4bc;background:#3d252c;border-color:#69343d}
+.dark .banner.success{color:#a8e2c4;background:#203f35;border-color:#315f4c}
+.dark .auth-card .error{color:#ffb4bc;background:#3d252c;border:1px solid #69343d;border-radius:5px;padding:9px 11px}
+.dark .reconcile-banner{background:#3d3025;border-color:#604a31}
+.dark .reconcile-banner>div{color:#f0bd7d}
+.dark .reconcile-banner p{color:#d1ad82}
+.dark .review-hash{color:#dce5f1}
+.dark .event-breaking{border-color:#344258}
+.dark .empty-table{color:#a3b1c5}
+.dark .auth{background:#0d1522}
+.dark .auth-card{background:#182335;color:#e6edf7}
+.dark .auth-card .wordmark{color:#e6edf7}
+.dark .auth-card .text-button{color:#ff9b75}
+.dark .auth-card .sign-in{color:#b1bfd2;border-color:#344258}
+.dark .version{color:#a3b1c5;border-color:#3a4960}
+.dark .repository-shell .sidebar{background:#111c2e}
+.dark .workspace-footer{color:#9aa8bc;border-color:#344258}
+.dark .status.abandoned,.dark .side-note{color:#a3b1c5}
+.dark .dialog-actions button,.dark [role=dialog]{color:#e6edf7}
+.dark [data-slot=dialog-content],.dark [data-slot=alert-dialog-content],.dark [data-slot=popover-content],.dark [data-slot=select-content],.dark [data-slot=dropdown-menu-content]{background:#1d2a3e;color:#e6edf7;border-color:#3a4960}
+.dark [data-slot=dialog-overlay],.dark [data-slot=alert-dialog-overlay]{background:rgb(0 0 0 / 65%)}
+.dark [data-slot=select-item]:focus,.dark [data-slot=dropdown-menu-item]:focus{background:#2a3b53;color:#f3f6fb}
+.dark [data-slot=button][data-variant=outline],.dark [data-slot=button][data-variant=ghost]{color:#d7e0ed}
+.dark .code-panel,.dark .editor-toolbar,.dark .table-scroll{border-color:#344258}
+.dark .editor-toolbar{background:#182335}
+.dark .file-picker select{background:#182335;color:#e6edf7}
+.dark .editor-body{background:#101a2a}
+.dark .line-numbers{background:#0d1726}
+.dark .journeys-index>.section-heading{background:#182335}
+.dark .journeys-filters input,.dark .journeys-filters select{background:#182335;color:#e6edf7}
+.dark .repository-shell .repository-picker{color:#eff3f9}
