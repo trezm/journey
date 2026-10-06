@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { integrationReviewBlocker } from '../lib/avc/review.ts';
+import { canSubmitForReview, hasCurrentApproval, integrationReviewBlocker, reviewPrimaryAction } from '../lib/avc/review.ts';
 
 const review = (kind, revision = 'current', resolved = false) => ({ kind, revision, resolved });
 const journey = (reviews = [], status = 'review') => ({ status, head: 'current', reviews });
@@ -14,6 +14,28 @@ test('a submitted revision stays blocked until that exact revision is approved',
 test('old or invalidated approvals cannot enable integration', () => {
     assert.match(integrationReviewBlocker(journey([review('approve', 'previous')]), true), /Awaiting approval/);
     assert.match(integrationReviewBlocker(journey([review('approve', 'current', true)]), true), /Awaiting approval/);
+});
+
+test('only an unresolved approval of the current revision switches review actions', () => {
+    assert.equal(hasCurrentApproval(journey()), false);
+    assert.equal(hasCurrentApproval(journey([review('approve', 'previous')])), false);
+    assert.equal(hasCurrentApproval(journey([review('approve', 'current', true)])), false);
+    assert.equal(hasCurrentApproval(journey([review('approve')])), true);
+    assert.equal(hasCurrentApproval(journey([{ ...review('approve'), authority: 'coordinator' }])), false);
+    assert.equal(hasCurrentApproval(journey([{ ...review('approve'), authority: 'coordinator' }]), true), true);
+});
+
+test('review actions are exclusive, hide submission in review, and respect optional approval', () => {
+    assert.equal(canSubmitForReview('working'), true);
+    assert.equal(canSubmitForReview('review'), false);
+    assert.equal(canSubmitForReview('integrated'), false);
+    assert.equal(canSubmitForReview('abandoned'), false);
+    assert.equal(reviewPrimaryAction(journey()), 'approve');
+    assert.equal(reviewPrimaryAction(journey([review('approve', 'previous')])), 'approve');
+    assert.equal(reviewPrimaryAction(journey([review('approve', 'current', true)])), 'approve');
+    assert.equal(reviewPrimaryAction(journey([review('approve')])), 'integrate');
+    assert.equal(reviewPrimaryAction(journey(), false), 'integrate');
+    assert.equal(reviewPrimaryAction(journey([], 'working')), null);
 });
 
 test('approval does not bypass submission or allow closed journeys to integrate', () => {
