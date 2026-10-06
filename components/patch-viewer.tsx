@@ -2,10 +2,12 @@
 
 import { Fragment, useId, useMemo, useState, useSyncExternalStore } from 'react';
 import { ChevronDown, GitCommitHorizontal } from 'lucide-react';
-import type { Files, Patch } from '@/lib/avc/core';
+import type { Files, Patch, Review } from '@/lib/avc/core';
 import { useRepositoryFiles } from '@/hooks/use-repository';
 import { patchFileStatus, patchSections, type DiffLine } from '@/lib/patch-diff';
 import { PatchReview, patchReviewKey } from '@/lib/patch-review';
+import { patchLineCommentTarget, type ChangesetCommentTarget } from '@/lib/changeset-detail';
+import type { Changeset, Journey } from '@/lib/avc/core';
 import { highlightCode } from '@/lib/syntax-highlight';
 import { SyntaxLine } from '@/components/syntax-code';
 import styles from './patch-viewer.module.css';
@@ -13,7 +15,9 @@ import styles from './patch-viewer.module.css';
 type View = 'split' | 'unified';
 const short = (revision: string) => revision.slice(0, 7);
 
-export function PatchViewer({ project, patch, number, defaultOpen = false }: { project: string; patch: Patch; number: string; defaultOpen?: boolean }) {
+type PatchViewerProps = { project: string; patch: Patch; number: string; defaultOpen?: boolean; reviews?: Review[]; canComment?: boolean; onComment?: (target: ChangesetCommentTarget) => Promise<boolean>; journey?: Pick<Journey, 'id' | 'head'>; changeset?: Pick<Changeset, 'id'> };
+
+export function PatchViewer({ project, patch, number, defaultOpen = false, reviews = [], canComment = false, onComment, journey, changeset }: PatchViewerProps) {
     const [requested, setRequested] = useState(defaultOpen);
     return <details open={defaultOpen} className={styles.patch} onToggle={event => { if (event.currentTarget.open) setRequested(true); }}>
         <summary className={styles.summary}>
@@ -21,11 +25,11 @@ export function PatchViewer({ project, patch, number, defaultOpen = false }: { p
             <div><strong>{patch.description}</strong><span>Patch {number} · {patch.changes.length} {patch.changes.length === 1 ? 'file' : 'files'} · {new Date(patch.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></div>
             <code>{short(patch.after)}</code><ChevronDown size={14}/>
         </summary>
-        {requested && <PatchContents key={patchReviewKey(project, patch)} project={project} patch={patch}/>}
+        {requested && <PatchContents key={patchReviewKey(project, patch)} project={project} patch={patch} reviews={reviews} canComment={canComment} onComment={onComment} journey={journey} changeset={changeset}/>}
     </details>;
 }
 
-function PatchContents({ project, patch }: { project: string; patch: Patch }) {
+function PatchContents({ project, patch, reviews = [], canComment = false, onComment, journey, changeset }: Omit<PatchViewerProps, 'number' | 'defaultOpen'>) {
     const [view, setView] = useState<View>('split');
     const [review] = useState(() => new PatchReview(patchReviewKey(project, patch), () => window.localStorage));
     const viewedPaths = useSyncExternalStore(review.subscribe, review.snapshot, review.serverSnapshot);
@@ -46,14 +50,19 @@ function PatchContents({ project, patch }: { project: string; patch: Patch }) {
         </div>
         {error ? <div className={styles.message} role="alert"><p>Unable to load this patch: {error}</p><button type="button" onClick={() => { void before.reload(); void after.reload(); }}>Retry</button></div>
             : !ready ? <p className={styles.message} role="status">Loading patch revisions…</p>
-            : patch.changes.map(change => <PatchFile key={change.path} change={change} before={before.files} after={after.files} view={view} viewed={viewedFiles.has(change.path)} onViewedChange={value => review.setViewed(change.path, value)}/>)}
+            : patch.changes.map(change => <PatchFile key={change.path} change={change} before={before.files} after={after.files} view={view} viewed={viewedFiles.has(change.path)} onViewedChange={value => review.setViewed(change.path, value)} reviews={reviews.filter(item => item.patch === patch.id && item.anchor?.path === change.path)} patch={patch} canComment={canComment} onComment={onComment} journey={journey} changeset={changeset}/>)}
     </div>;
 }
 
-function PatchFile({ change, before, after, view, viewed, onViewedChange }: { change: Patch['changes'][number]; before: Files; after: Files; view: View; viewed: boolean; onViewedChange: (value: boolean) => void }) {
+function PatchFile({ change, before, after, view, viewed, onViewedChange, reviews, patch, canComment, onComment, journey, changeset }: { change: Patch['changes'][number]; before: Files; after: Files; view: View; viewed: boolean; onViewedChange: (value: boolean) => void; reviews: Review[]; patch: Patch; canComment: boolean; onComment?: (target: ChangesetCommentTarget) => Promise<boolean>; journey?: Pick<Journey, 'id' | 'head'>; changeset?: Pick<Changeset, 'id'> }) {
     const diffId = useId();
     const [expandedChoice, setExpandedChoice] = useState<boolean | null>(null);
+    const [lineThreads, setLineThreads] = useState<Record<string, { open?: boolean; draft?: string; pending?: boolean; error?: string }>>({});
     const expanded = expandedChoice ?? !viewed;
+    const threadProps = (side: 'before' | 'after', line: number) => {
+        const key = `${side}:${line}`;
+        return { thread: lineThreads[key] ?? {}, setThread: (updates: { open?: boolean; draft?: string; pending?: boolean; error?: string }) => setLineThreads(current => ({ ...current, [key]: { ...current[key], ...updates } })) };
+    };
     const oldText = Object.hasOwn(before, change.path) ? before[change.path] : undefined;
     const newText = Object.hasOwn(after, change.path) ? after[change.path] : undefined;
     const sections = useMemo(() => patchSections(oldText ?? '', newText ?? '', change.hunks), [oldText, newText, change.hunks]);
@@ -83,9 +92,14 @@ function PatchFile({ change, before, after, view, viewed, onViewedChange }: { ch
                     {view === 'split' ? section.rows.map((row, i) => <tr key={i}>
                         {(['before', 'after'] as const).map(side => {
                             const line = row[side], className = line ? styles[line.kind] : styles.blank;
-                            return <Fragment key={side}><td className={`${styles.number} ${className}`}>{line?.[side]}</td><td className={`${styles.code} ${className}`}><span className={styles.marker} aria-hidden="true">{line?.kind === 'removed' ? '−' : line?.kind === 'added' ? '+' : ' '}</span>{line && renderCode(line, side)}</td></Fragment>;
+                            const anchorSide = side;
+                            return <Fragment key={side}><td className={`${styles.number} ${className}`}>{line?.[side]}</td><td className={`${styles.code} ${className}`}>{line && <><span className={styles.marker} aria-hidden="true">{line.kind === 'removed' ? '−' : line.kind === 'added' ? '+' : ' '}</span>{renderCode(line, side)}<LineDiscussion {...threadProps(anchorSide, line[side]!)} path={change.path} side={anchorSide} line={line[side]!} context={line.text} patch={patch} reviews={reviews} canComment={canComment} onComment={onComment} journey={journey} changeset={changeset}/></>}</td></Fragment>;
                         })}
-                    </tr>) : section.lines.map((line, i) => <tr key={i} className={styles[line.kind]}><td className={styles.number}>{line.before}</td><td className={styles.number}>{line.after}</td><td className={styles.code}><span className={styles.marker} aria-hidden="true">{line.kind === 'removed' ? '−' : line.kind === 'added' ? '+' : ' '}</span>{renderCode(line, line.kind === 'removed' ? 'before' : 'after')}</td></tr>)}
+                    </tr>) : section.lines.map((line, i) => {
+                        const side = line.kind === 'removed' ? 'before' : 'after';
+                        const number = line[side];
+                        return <tr key={i} className={styles[line.kind]}><td className={styles.number}>{line.before}</td><td className={styles.number}>{line.after}</td><td className={styles.code}><span className={styles.marker} aria-hidden="true">{line.kind === 'removed' ? '−' : line.kind === 'added' ? '+' : ' '}</span>{renderCode(line, side)}{number !== undefined && <><LineDiscussion {...threadProps(side, number)} path={change.path} side={side} line={number} context={line.text} patch={patch} reviews={reviews} canComment={canComment} onComment={onComment} journey={journey} changeset={changeset}/>{line.kind === 'context' && line.before !== undefined && <LineDiscussion {...threadProps('before', line.before)} path={change.path} side="before" line={line.before} context={line.text} patch={patch} reviews={reviews} canComment={canComment} onComment={onComment} journey={journey} changeset={changeset}/>}</>}</td></tr>;
+                    })}
                 </Fragment>)}</tbody>
             </table>
         </div> : <p className={styles.message}>{oldText === undefined ? 'Empty file added.' : newText === undefined ? 'Empty file deleted.' : 'No visible line changes.'}</p>}
@@ -93,4 +107,27 @@ function PatchFile({ change, before, after, view, viewed, onViewedChange }: { ch
         </>}
         </div>
     </section>;
+}
+
+function LineDiscussion({ path, side, line, context, patch, reviews, canComment, onComment, journey, changeset, thread, setThread }: { path: string; side: 'before' | 'after'; line: number; context: string; patch: Patch; reviews: Review[]; canComment: boolean; onComment?: (target: ChangesetCommentTarget) => Promise<boolean>; journey?: Pick<Journey, 'id' | 'head'>; changeset?: Pick<Changeset, 'id'>; thread: { open?: boolean; draft?: string; pending?: boolean; error?: string }; setThread: (updates: { open?: boolean; draft?: string; pending?: boolean; error?: string }) => void }) {
+    const open = thread.open ?? false, draft = thread.draft ?? '', pending = thread.pending ?? false, error = thread.error ?? '';
+    const anchored = reviews.filter(review => review.anchor?.side === side && review.anchor.line === line);
+    async function submit(event: React.FormEvent) {
+        event.preventDefault();
+        if (!canComment || pending || !draft.trim() || !journey || !changeset || !onComment) return;
+        setThread({ pending: true, error: '' });
+        try {
+            if (await onComment(patchLineCommentTarget(journey, changeset, patch, { path, side, line, context }, draft))) setThread({ draft: '', pending: false });
+            else setThread({ error: 'Comment was not saved. Your draft is preserved; try again.', pending: false });
+        } catch (cause) {
+            setThread({ error: cause instanceof Error ? cause.message : 'Comment was not saved. Your draft is preserved; try again.', pending: false });
+        }
+    }
+    return <>
+        {(canComment || anchored.length > 0) && <button type="button" className={styles.lineCommentToggle} aria-expanded={open || anchored.length > 0} aria-label={`${anchored.length ? 'View' : 'Add'} comments on ${path}, ${side} line ${line}`} onClick={() => setThread({ open: !open })}>{anchored.length ? `● ${anchored.length}` : '+'}</button>}
+        {(open || anchored.length > 0) && <div className={styles.lineThread}>
+            {anchored.map(review => <div className={styles.lineComment} key={review.id}><strong>{review.actor}</strong><span>{review.body}</span>{review.anchor?.context && !context.startsWith(review.anchor.context) && <small>Context differs from the patch snapshot: <code>{review.anchor.context}</code></small>}</div>)}
+            {open && canComment && <form onSubmit={submit} className={styles.lineComposer}><label className={styles.srOnly} htmlFor={`comment-${patch.id}-${path}-${side}-${line}`}>Comment on {path}, {side} line {line}</label><textarea id={`comment-${patch.id}-${path}-${side}-${line}`} rows={2} maxLength={4000} value={draft} onChange={event => setThread({ draft: event.target.value })} disabled={pending} placeholder={`Comment on ${side} line ${line}…`}/>{error && <span role="alert">{error}</span>}<button type="submit" disabled={pending || !draft.trim()}>{pending ? 'Posting…' : 'Post comment'}</button></form>}
+        </div>}
+    </>;
 }

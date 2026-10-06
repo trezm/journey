@@ -219,10 +219,12 @@ export async function POST(req: Request) {
                     }
                     case 'review': {
                         validateReviewTarget(j, b);
+                        const patch = b.anchor && j.changesets.flatMap(changeset => changeset.patches).find(item => item.id === b.patch);
+                        const anchor = patch ? validateReviewTarget(j, b, { before: await git.files(patch.before), after: await git.files(patch.after) }) : undefined;
                         const authority = b.kind === 'approve' ? approvalAuthority(s, j, user, legacyRoles) : undefined;
                         if (b.kind === 'approve')
                             validateSubmission(s, j);
-                        const r = { id: crypto.randomUUID(), actor: user.id, body: field(b.body ?? (b.kind === 'approve' ? 'Approved' : 'Review'), 'Review text'), kind: b.kind, revision: j.head, at: Date.now(), ...(authority ? { authority } : {}), ...(b.changeset ? { changeset: b.changeset } : {}), ...(b.patch ? { patch: b.patch } : {}) };
+                        const r = { id: crypto.randomUUID(), actor: user.id, body: field(b.body ?? (b.kind === 'approve' ? 'Approved' : 'Review'), 'Review text'), kind: b.kind, revision: j.head, at: Date.now(), ...(authority ? { authority } : {}), ...(b.changeset ? { changeset: b.changeset } : {}), ...(b.patch ? { patch: b.patch } : {}), ...(anchor ? { anchor } : {}) };
                         j.reviews.push(r);
                         emit(s, b.kind === 'approve' ? 'review.approved' : b.kind === 'request_changes' ? 'review.changes_requested' : 'review.commented', user.id, { review: r.id, body: r.body, revision: j.head, ...(authority ? { authority } : {}) }, j.id, [j.id]);
                         result = { review: r.id };

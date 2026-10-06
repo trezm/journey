@@ -50,7 +50,7 @@ function ChangesetContents({ project, journey, changeset, onComment, canComment 
         <section aria-label="Changeset changes" className={styles.changes}>
             <h3>Changes <span>{changeset.patches.length} patches · {fileCount} files</span></h3>
             <p className={styles.note}>All patches in this changeset, in publication order.</p>
-            {changeset.patches.length ? changeset.patches.map((patch, index) => <div key={patch.id} id={`patch-${patch.id}`}><PatchViewer project={project} patch={patch} number={`${number}.${index + 1}`} defaultOpen/></div>) : <p className={styles.empty}>No changes published yet.</p>}
+            {changeset.patches.length ? changeset.patches.map((patch, index) => <div key={patch.id} id={`patch-${patch.id}`}><PatchViewer project={project} patch={patch} number={`${number}.${index + 1}`} defaultOpen reviews={reviews.filter(review => review.patch === patch.id && review.anchor)} canComment={canComment} onComment={onComment} journey={journey} changeset={changeset}/></div>) : <p className={styles.empty}>No changes published yet.</p>}
         </section>
         <section aria-label="Changeset discussion" className={styles.discussion}>
             <h3>Discussion <span>{reviews.length}</span></h3>

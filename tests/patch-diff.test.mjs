@@ -102,13 +102,14 @@ function renderViewer(options = {}) {
             if (!(index in state)) state[index] = index === 0 ? options.requested ?? false : initial === 'split' ? options.view ?? 'split' : typeof initial === 'function' ? initial() : initial;
             return [state[index], value => { state[index] = typeof value === 'function' ? value(state[index]) : value; updates.push(value); }];
         } };
-        if (name === 'react/jsx-runtime') return { ...jsx, ...Object.fromEntries(['jsx', 'jsxs'].map(method => [method, (type, props, key) => { if (type === 'details' || type === 'button' || type === 'input') controls.push({ type, ...props }); return jsx[method](type, props, key); }])) };
+        if (name === 'react/jsx-runtime') return { ...jsx, ...Object.fromEntries(['jsx', 'jsxs'].map(method => [method, (type, props, key) => { if (type === 'details' || type === 'button' || type === 'input' || type === 'form' || type === 'textarea') controls.push({ type, ...props }); return jsx[method](type, props, key); }])) };
         if (name === '@/hooks/use-repository') return { useRepositoryFiles: (project, revision) => {
             calls.push({ project, revision });
             return { status: options.status ?? 'ready', error: options.error ?? '', files: revision === patch.before ? options.before ?? { 'app.ts': beforeText } : options.after ?? { 'app.ts': afterText }, reload: () => {} };
         } };
         if (name === '@/lib/patch-diff') return helpers;
         if (name === '@/lib/patch-review') return reviewHelpers;
+        if (name === '@/lib/changeset-detail') return { patchLineCommentTarget: (journey, changeset, patch, anchor, body) => ({ journey: journey.id, changeset: changeset.id, revision: journey.head, patch: patch.id, anchor, body }) };
         if (name === '@/lib/syntax-highlight') return { highlightCode: (path, source) => { highlightCalls.push({ path, source }); return { language: 'typescript', lines: source.split('\n').map(value => [{ value, classes: [] }]) }; } };
         if (name === '@/components/syntax-code') return { SyntaxLine: ({ tokens }) => React.createElement('span', {}, tokens.map(token => token.value).join('')) };
         if (name.endsWith('.module.css')) return { default: new Proxy({}, { get: (_, key) => key }) };
@@ -118,7 +119,7 @@ function renderViewer(options = {}) {
     runInNewContext(compiled, { module: testModule, exports: testModule.exports, require: mockRequire, window: { localStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) } } });
     function render() {
         cursor = 0; controls.length = 0;
-        return renderToStaticMarkup(React.createElement(testModule.exports.PatchViewer, { project: options.project ?? 'project-a', patch: options.patch ?? patch, number: '1.1' }));
+        return renderToStaticMarkup(React.createElement(testModule.exports.PatchViewer, { project: options.project ?? 'project-a', patch: options.patch ?? patch, number: '1.1', reviews: options.reviews ?? [], canComment: options.canComment ?? false, onComment: options.onComment ?? (async () => true), journey: { id: 'journey', head: 'head' }, changeset: { id: 'changeset' } }));
     }
     return { html: render(), render, calls, controls, updates, highlightCalls, storage };
 }
@@ -212,4 +213,51 @@ test('marking a file viewed collapses it, updates progress, and persists only fo
     assert.match(view.render(), /0 of 1 files viewed/);
     assert.match(view.render(), /const oldValue/);
     assert.match(renderViewer({ requested: true, storage: view.storage }).html, /0 of 1 files viewed/);
+});
+
+test('line discussions stay on their immutable patch path, side, and line and remain visible read-only', () => {
+    const reviews = [
+        { id: 'old-comment', actor: 'reviewer', body: 'This deleted line is intentional?', kind: 'comment', revision: 'head', patch: 'p1', anchor: { path: 'app.ts', side: 'before', line: 1, context: 'const oldValue = 1;' }, at: 1 },
+        { id: 'new-comment', actor: 'author', body: 'Updated implementation detail', kind: 'comment', revision: 'head', patch: 'p1', anchor: { path: 'app.ts', side: 'after', line: 1, context: 'const newValue = 2;' }, at: 2 },
+        { id: 'sibling', actor: 'other', body: 'must stay elsewhere', kind: 'comment', revision: 'head', patch: 'elsewhere', anchor: { path: 'app.ts', side: 'after', line: 1, context: 'const newValue = 2;' }, at: 3 },
+    ];
+    const html = renderViewer({ requested: true, reviews, canComment: false }).html;
+    assert.match(html, /This deleted line is intentional\?/);
+    assert.match(html, /Updated implementation detail/);
+    assert.doesNotMatch(html, /must stay elsewhere/);
+    assert.match(html, /before line 1/);
+    assert.match(html, /after line 1/);
+    assert.doesNotMatch(html, /aria-label="Add comments on app\.ts/);
+});
+
+test('unified diffs keep before and after discussions on unchanged context lines', () => {
+    const contextPatch = { ...patch, changes: [{ path: 'app.ts', hunks: diff('old\nshared\n', 'new\nshared\n') }] };
+    const reviews = [
+        { id: 'before', actor: 'reviewer', body: 'old-side note', kind: 'comment', revision: 'head', patch: 'p1', anchor: { path: 'app.ts', side: 'before', line: 2, context: 'shared' }, at: 1 },
+        { id: 'after', actor: 'reviewer', body: 'new-side note', kind: 'comment', revision: 'head', patch: 'p1', anchor: { path: 'app.ts', side: 'after', line: 2, context: 'shared' }, at: 2 },
+    ];
+    const rendered = renderViewer({ requested: true, view: 'unified', patch: contextPatch, before: { 'app.ts': 'old\nshared\n' }, after: { 'app.ts': 'new\nshared\n' }, reviews });
+    assert.match(rendered.html, /old-side note/);
+    assert.match(rendered.html, /new-side note/);
+});
+
+test('line composer submits a stable anchor and preserves drafts after false saves or stale errors', async () => {
+    for (const shouldThrow of [false, true]) {
+        const calls = [];
+        const onComment = async target => { calls.push(target); if (shouldThrow) throw new Error('Comment targets an old revision.'); return false; };
+        const view = renderViewer({ requested: true, canComment: true, onComment });
+        view.controls.find(control => control['aria-label'] === 'Add comments on app.ts, after line 1').onClick();
+        view.render();
+        view.controls.find(control => control.type === 'textarea').onChange({ target: { value: 'Keep this note' } });
+        view.render();
+        await view.controls.find(control => control.type === 'form').onSubmit({ preventDefault() {} });
+        const html = view.render();
+        assert.equal(calls[0].patch, 'p1');
+        assert.equal(calls[0].anchor.path, 'app.ts');
+        assert.equal(calls[0].anchor.side, 'after');
+        assert.equal(calls[0].anchor.line, 1);
+        assert.equal(calls[0].anchor.context, 'const newValue = 2;');
+        assert.match(html, /Keep this note/);
+        assert.match(html, /Comment was not saved|Comment targets an old revision/);
+    }
 });

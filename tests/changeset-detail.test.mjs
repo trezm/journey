@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { validateReviewTarget } from '../lib/avc/review-target.ts';
-import { changesetCommentTarget, changesetDiscussion } from '../lib/changeset-detail.ts';
+import { changesetCommentTarget, changesetDiscussion, patchLineCommentTarget } from '../lib/changeset-detail.ts';
 
-const changeset = { id: 'one', patches: [{ id: 'patch-one' }, { id: 'patch-two' }] };
+const changeset = { id: 'one', patches: [{ id: 'patch-one', changes: [{ path: 'file.ts', hunks: [] }] }, { id: 'patch-two', changes: [{ path: 'file.ts', hunks: [] }] }] };
 const journey = (status = 'working') => ({ id: 'journey', status, head: 'current', changesets: [changeset, { id: 'other', patches: [{ id: 'other-patch' }] }] });
 const target = (extra = {}) => ({ kind: 'comment', revision: 'current', changeset: 'one', ...extra });
 const code = expected => error => error.code === expected;
@@ -32,6 +32,27 @@ test('comments reject stale revisions, missing anchors and mismatched patch/chan
     assert.throws(() => validateReviewTarget(journey('review'), target({ kind: 'unknown' })), code('invalid_review'));
 });
 
+test('line comments require a valid path, side, line context, and matching changeset patch', () => {
+    const anchor = { path: 'file.ts', side: 'before', line: 2, context: 'old value' };
+    assert.doesNotThrow(() => validateReviewTarget(journey(), target({ patch: 'patch-one', anchor })));
+    assert.throws(() => validateReviewTarget(journey(), target({ anchor })), code('invalid_review_anchor'));
+    assert.throws(() => validateReviewTarget(journey(), target({ patch: 'patch-one', anchor: { ...anchor, path: 'missing.ts' } })), code('invalid_line_anchor'));
+    assert.throws(() => validateReviewTarget(journey(), target({ patch: 'patch-one', anchor: { ...anchor, line: 0 } })), code('invalid_line_anchor'));
+    assert.throws(() => validateReviewTarget(journey(), target({ patch: 'patch-one', anchor: { ...anchor, side: 'middle' } })), code('invalid_line_anchor'));
+    assert.throws(() => validateReviewTarget(journey('review'), target({ patch: 'patch-one', kind: 'approve', anchor })), code('invalid_review_anchor'));
+});
+
+test('line anchors are checked against the selected immutable patch snapshot', () => {
+    const j = journey();
+    j.changesets[0].patches[0].changes[0].hunks = core.diff('old line\nshared', 'new line\nshared');
+    const anchor = { path: 'file.ts', side: 'before', line: 1, context: 'untrusted client text' };
+    const saved = validateReviewTarget(j, target({ patch: 'patch-one', anchor }), { before: { 'file.ts': 'old line\nshared' }, after: { 'file.ts': 'new line\nshared' } });
+    assert.deepEqual(saved, { path: 'file.ts', side: 'before', line: 1, context: 'old line' });
+    assert.throws(() => validateReviewTarget(j, target({ patch: 'patch-one', anchor: { ...anchor, line: 50 } }), { before: { 'file.ts': 'old line\nshared' }, after: { 'file.ts': 'new line\nshared' } }), code('invalid_line_anchor'));
+    assert.throws(() => validateReviewTarget(j, target({ patch: 'patch-one', anchor: { ...anchor, side: 'after' } }), { before: { 'file.ts': 'old line\nshared' }, after: {} }), code('invalid_line_anchor'));
+    assert.throws(() => validateReviewTarget(j, target({ patch: 'patch-one', anchor: { ...anchor, side: 'before' } }), { before: {}, after: { 'file.ts': 'new line' } }), code('invalid_line_anchor'));
+});
+
 test('discussion isolates sibling and journey comments while including older patch-only comments', () => {
     const reviews = [
         { id: 'journey-comment', at: 0 },
@@ -49,6 +70,7 @@ test('discussion isolates sibling and journey comments while including older pat
 test('composer target captures explicit journey, changeset and current revision without blank padding', () => {
     assert.deepEqual(changesetCommentTarget(journey(), changeset, '  hello\nworld  '), { journey: 'journey', changeset: 'one', revision: 'current', body: 'hello\nworld' });
     assert.equal(changesetCommentTarget({ ...journey(), head: 'new' }, changeset, 'text').revision, 'new');
+    assert.deepEqual(patchLineCommentTarget(journey(), changeset, changeset.patches[0], { path: 'file.ts', side: 'after', line: 4, context: 'new value' }, '  precise note '), { journey: 'journey', changeset: 'one', revision: 'current', body: 'precise note', patch: 'patch-one', anchor: { path: 'file.ts', side: 'after', line: 4, context: 'new value' } });
 });
 
 // Run the actual route with an in-memory storage boundary, retaining production
@@ -63,6 +85,8 @@ const compiledRoute = ts.transpileModule(readFileSync(new URL('../app/api/avc/ro
 
 function routeFixture(status = 'working', denied = false) {
     const j = { ...journey(status), reviews: [] };
+    Object.assign(j.changesets[0].patches[0], { before: 'before', after: 'after' });
+    j.changesets[0].patches[0].changes[0].hunks = core.diff('old line', 'new line');
     const state = { journeys: [j], receipts: {}, events: [], sequence: 0 };
     let authCalls = 0;
     const modules = {
@@ -74,7 +98,7 @@ function routeFixture(status = 'working', denied = false) {
             sameOrigin: () => {}, digest: async text => text,
             authorize: async (_req, project) => { authCalls++; assert.equal(project, 'repo'); core.insist(!denied, 'forbidden', 'No repository access.', 403); return { id: 'human', agent: false }; },
         },
-        '@/lib/avc/git': { GitStore: class {} },
+        '@/lib/avc/git': { GitStore: class { files = async revision => revision === 'before' ? { 'file.ts': 'old line' } : { 'file.ts': 'new line' }; } },
     };
     const exports = {};
     new Function('require', 'exports', compiledRoute)(id => modules[id] ?? {}, exports);
@@ -101,7 +125,13 @@ test('actual review endpoint accepts scoped comments in all states and preserves
     assert.equal((await paused.post({})).status, 409);
     assert.equal(paused.j.reviews.length, 0);
     const f = routeFixture();
-    for (const kind of ['approve', 'request_changes']) assert.equal((await f.post({ kind })).status, 409);
-    assert.equal((await f.post({ patch: 'other-patch' })).status, 400);
-    assert.equal(f.j.reviews.length, 0);
+    assert.equal((await f.post({ patch: 'patch-one', anchor: { path: 'file.ts', side: 'after', line: 1, context: 'line' } })).status, 200);
+    assert.deepEqual(f.j.reviews[0].anchor, { path: 'file.ts', side: 'after', line: 1, context: 'new line' });
+    assert.equal((await f.post({ patch: 'patch-one', anchor: { path: 'missing.ts', side: 'after', line: 1, context: 'line' } })).status, 400);
+    assert.equal((await f.post({ patch: 'patch-one', anchor: { path: 'file.ts', side: 'after', line: 20, context: 'line' } })).status, 400);
+    assert.equal(f.j.reviews.length, 1);
+    const f2 = routeFixture();
+    for (const kind of ['approve', 'request_changes']) assert.equal((await f2.post({ kind })).status, 409);
+    assert.equal((await f2.post({ patch: 'other-patch' })).status, 400);
+    assert.equal(f2.j.reviews.length, 0);
 });

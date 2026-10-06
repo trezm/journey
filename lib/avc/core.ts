@@ -58,6 +58,7 @@ export type Review = {
     revision: string;
     changeset?: string;
     patch?: string;
+    anchor?: { path: string; side: 'before' | 'after'; line: number; context: string };
     at: number;
     resolved?: boolean;
     authority?: 'human' | 'coordinator';
