@@ -6,11 +6,11 @@ import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { GitSyncWarning } from '@/components/git-sync-warning';
 import type { SyncState } from '@/lib/avc/sync';
-import type { Provider, ProviderRepository } from '@/lib/avc/oauth';
+import type { GitHubOwner, Provider, ProviderRepository } from '@/lib/avc/oauth';
 import styles from './git-sync-settings.module.css';
 
 type Snapshot = { head: string; sync?: SyncState; user: { agent: boolean } };
-type Account = { configured: boolean; connection: { provider: Provider; username: string } | null; repositories?: ProviderRepository[]; nextPage?: number | null };
+type Account = { configured: boolean; connection: { provider: Provider; username: string } | null; repositories?: ProviderRepository[]; nextPage?: number | null; owners?: GitHubOwner[]; nextOwnerPage?: number | null };
 type Configuration = { remote: string; branch: string; enabled: boolean };
 const configuration = (sync?: SyncState): Configuration => ({ remote: sync?.remote ?? '', branch: sync?.branch ?? 'main', enabled: sync?.enabled ?? false });
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
@@ -21,6 +21,10 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export function GitSyncSettings({ project }: { project: string }) {
+    return <GitSyncSettingsContent key={project} project={project}/>;
+}
+
+function GitSyncSettingsContent({ project }: { project: string }) {
     const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
     const [draft, setDraft] = useState<Configuration | null>(null);
     const [loading, setLoading] = useState(true);
@@ -33,6 +37,15 @@ export function GitSyncSettings({ project }: { project: string }) {
     const [repositories, setRepositories] = useState<ProviderRepository[]>([]);
     const [nextPage, setNextPage] = useState<number | null>(null);
     const [accountBusy, setAccountBusy] = useState(false);
+    const [picker, setPicker] = useState<'owners' | 'repositories' | null>(null);
+    const [owners, setOwners] = useState<GitHubOwner[]>([]);
+    const [owner, setOwner] = useState('');
+    const [nextOwnerPage, setNextOwnerPage] = useState<number | null>(null);
+    const [pickerError, setPickerError] = useState('');
+    const [pickerBusy, setPickerBusy] = useState(false);
+    const pickerRequest = useRef(0);
+    const retryPicker = useRef<(() => void) | null>(null);
+    useEffect(() => () => { pickerRequest.current++; }, []);
     const selectedProvider: Provider = draft?.remote.startsWith('https://gitlab.com/') ? 'gitlab' : 'github';
     const linked = !!accounts[selectedProvider]?.connection;
     useEffect(() => {
@@ -56,13 +69,36 @@ export function GitSyncSettings({ project }: { project: string }) {
             window.location.assign(value.url);
         } catch (e) { setError((e as Error).message); setAccountBusy(false); }
     }
-    async function listRepositories(p: Provider, page = 1) {
-        setAccountBusy(true); setError(''); setProvider(p);
+    async function listOwners(page = 1) {
+        const requestId = ++pickerRequest.current;
+        setPickerBusy(true); setPickerError(''); setProvider('github'); setPicker('owners'); setOwner(''); setRepositories([]); setNextPage(null);
+        if (page === 1) { setOwners([]); setOwner(''); setRepositories([]); setNextPage(null); setNextOwnerPage(null); }
+        retryPicker.current = () => { void listOwners(page); };
         try {
-            const value = await request<Account>(`/api/oauth/${p}?project=${encodeURIComponent(project)}&repos=1&page=${page}`);
-            setRepositories(previous => page === 1 ? value.repositories ?? [] : [...previous, ...value.repositories ?? []]); setNextPage(value.nextPage ?? null);
-        } catch (e) { setError((e as Error).message); }
-        finally { setAccountBusy(false); }
+            const value = await request<Account>(`/api/oauth/github?project=${encodeURIComponent(project)}&owners=1&page=${page}`);
+            if (requestId !== pickerRequest.current) return;
+            setOwners(previous => [...new Map((page === 1 ? value.owners ?? [] : [...previous, ...value.owners ?? []]).map(item => [item.login.toLowerCase(), item])).values()]);
+            setNextOwnerPage(value.nextOwnerPage ?? null);
+        } catch (e) { if (requestId === pickerRequest.current) setPickerError((e as Error).message); }
+        finally { if (requestId === pickerRequest.current) setPickerBusy(false); }
+    }
+    async function listRepositories(p: Provider, page = 1, selectedOwner = owner) {
+        const requestId = ++pickerRequest.current;
+        setPickerBusy(true); setPickerError(''); setProvider(p); setPicker('repositories');
+        if (page === 1) { setRepositories([]); setNextPage(null); }
+        retryPicker.current = () => { void listRepositories(p, page, selectedOwner); };
+        try {
+            const value = await request<Account>(`/api/oauth/${p}?project=${encodeURIComponent(project)}&repos=1&page=${page}${p === 'github' ? `&owner=${encodeURIComponent(selectedOwner)}` : ''}`);
+            if (requestId !== pickerRequest.current) return;
+            setRepositories(previous => [...new Map((page === 1 ? value.repositories ?? [] : [...previous, ...value.repositories ?? []]).map(item => [item.id, item])).values()]);
+            setNextPage(value.nextPage ?? null);
+        } catch (e) { if (requestId === pickerRequest.current) setPickerError((e as Error).message); }
+        finally { if (requestId === pickerRequest.current) setPickerBusy(false); }
+    }
+    function selectOwner(login: string) {
+        setOwner(login); setRepositories([]); setNextPage(null); setPickerError('');
+        if (login) void listRepositories('github', 1, login);
+        else { pickerRequest.current++; setPickerBusy(false); setPicker('owners'); }
     }
     const [now, setNow] = useState(() => Date.now());
     const initialized = useRef(false);
@@ -125,15 +161,23 @@ export function GitSyncSettings({ project }: { project: string }) {
                 {snapshot && draft && <>
                     <div className={styles.status}><div><span className={styles.statusLabel}>SYNC STATUS</span><strong>{status}</strong></div><div className={styles.lastSync}>{lastActivity ? <>{sync?.lastCheckedAt === lastActivity ? 'Last checked' : 'Last activity'} <time dateTime={new Date(lastActivity).toISOString()}>{new Date(lastActivity).toLocaleString()}</time></> : 'No hosted sync activity recorded'}{sync?.enabled && stale && <span>No recent activity. Check Cloudflare scheduling and provider permissions.</span>}</div></div>
                     {editable && <div className={styles.accounts}>
-                        <h3>Connected accounts</h3><p>Connect GitHub or GitLab to select a personal repository. Provider credentials stay on the server.</p>
+                        <h3>Connected accounts</h3><p>Choose a GitHub organization or personal account, then a repository. GitLab lists your personal repositories. Provider credentials stay on the server.</p>
                         <div className={styles.accountButtons}>{(['github', 'gitlab'] as const).map(p => <div key={p}>
                             <strong>{p === 'github' ? 'GitHub' : 'GitLab'}</strong>
                             <span>{accounts[p]?.connection ? `Connected as ${accounts[p]!.connection!.username}` : accounts[p]?.configured === false ? 'OAuth is not configured for this deployment' : 'Not connected'}</span>
                             <Button type="button" variant="outline" disabled={busy || accountBusy || accounts[p]?.configured !== true} onClick={() => { void connect(p); }}>{accounts[p]?.connection ? 'Reconnect account' : `Connect ${p === 'github' ? 'GitHub' : 'GitLab'}`}</Button>
-                            {accounts[p]?.connection && <Button type="button" variant="outline" disabled={busy || accountBusy || locked} onClick={() => { void listRepositories(p); }}>Choose repository</Button>}
+                            {accounts[p]?.connection && <Button type="button" variant="outline" disabled={busy || accountBusy || locked} onClick={() => { if (p === 'github') void listOwners(); else void listRepositories(p); }}>Choose repository</Button>}
                         </div>)}</div>
-                        {repositories.length > 0 && <label htmlFor="provider-repository">{provider === 'github' ? 'GitHub' : 'GitLab'} repository<select id="provider-repository" disabled={busy || accountBusy || locked} value={repositories.some(repo => repo.remote === draft.remote) ? draft.remote : ''} onChange={event => { const repo = repositories.find(value => value.remote === event.target.value); if (repo) change({ remote: repo.remote, branch: repo.branch }); }}><option value="">Select a repository</option>{repositories.map(repo => <option key={repo.id} value={repo.remote}>{repo.name} ({repo.private ? 'private' : 'public'})</option>)}</select></label>}
-                        {nextPage && <Button type="button" variant="outline" disabled={accountBusy} onClick={() => { void listRepositories(provider, nextPage); }}>Load more repositories</Button>}
+                        {picker && provider === 'github' && <>
+                            <label htmlFor="github-owner">GitHub organization or account<select id="github-owner" disabled={busy || accountBusy || locked} value={owner} onChange={event => selectOwner(event.target.value)}><option value="">Choose an organization or personal account</option>{owners.map(item => <option key={item.login} value={item.login}>{item.login} ({item.kind === 'personal' ? 'personal account' : 'organization'})</option>)}</select></label>
+                            {nextOwnerPage && <Button type="button" variant="outline" disabled={pickerBusy || busy || locked} onClick={() => { void listOwners(nextOwnerPage); }}>Load more organizations</Button>}
+                            <p className={styles.small}>Missing an organization? Reconnect GitHub and grant Journey access to that organization.</p>
+                        </>}
+                        {picker === 'repositories' && <label htmlFor="provider-repository">{provider === 'github' ? `GitHub repository in ${owner}` : 'GitLab repository'}<select id="provider-repository" disabled={busy || accountBusy || pickerBusy || locked || !repositories.length} value={repositories.some(repo => repo.remote === draft.remote) ? draft.remote : ''} onChange={event => { const repo = repositories.find(value => value.remote === event.target.value); if (repo) change({ remote: repo.remote, branch: repo.branch }); }}><option value="">Select a repository</option>{repositories.map(repo => <option key={repo.id} value={repo.remote}>{repo.name} ({repo.private ? 'private' : 'public'})</option>)}</select></label>}
+                        {picker === 'repositories' && !pickerBusy && !pickerError && repositories.length === 0 && <p role="status">No writable repositories found{nextPage ? ' on this page. Load more repositories to continue.' : '.'}</p>}
+                        {picker === 'repositories' && nextPage && <Button type="button" variant="outline" disabled={pickerBusy || busy || locked} onClick={() => { void listRepositories(provider, nextPage); }}>Load more repositories</Button>}
+                        {pickerBusy && <p role="status">{picker === 'owners' ? 'Loading GitHub organizations…' : 'Loading repositories…'}</p>}
+                        {pickerError && <div role="alert"><p>{pickerError}</p><Button type="button" variant="outline" disabled={pickerBusy || busy || locked} onClick={() => retryPicker.current?.()}>Retry selection</Button></div>}
                         {accountBusy && <p role="status">Loading provider…</p>}
                     </div>}
                     <form onSubmit={save}>

@@ -57,7 +57,7 @@ export async function startOAuth(p: Provider, user: string, session: string, pro
     await db.prepare('DELETE FROM oauth_states WHERE user=? AND session=? AND provider=?').bind(user, session, p).run();
     await db.prepare('INSERT INTO oauth_states(digest,user,session,provider,project,verifier,expires) VALUES(?,?,?,?,?,?,?)').bind(stateHash, user, session, p, project, await encrypt(verifier, `oauth-state:${stateHash}:${user}:${session}`, env.GITHUB_SYNC_KEY), Date.now() + 600_000).run();
     const target = new URL(config.authorize);
-    target.search = new URLSearchParams({ client_id: config.client, redirect_uri: config.redirect, response_type: 'code', scope: p === 'github' ? 'repo workflow' : 'read_user read_api write_repository', state, code_challenge: Buffer.from(await crypto.subtle.digest('SHA-256', encoder.encode(verifier))).toString('base64url'), code_challenge_method: 'S256' }).toString();
+    target.search = new URLSearchParams({ client_id: config.client, redirect_uri: config.redirect, response_type: 'code', scope: p === 'github' ? 'repo workflow read:org' : 'read_user read_api write_repository', state, code_challenge: Buffer.from(await crypto.subtle.digest('SHA-256', encoder.encode(verifier))).toString('base64url'), code_challenge_method: 'S256' }).toString();
     return target.href;
 }
 export async function providerJSON(url: string, token?: string, init: RequestInit = {}, send: typeof fetch = fetch): Promise<unknown> {
@@ -117,19 +117,46 @@ export async function connectionToken(user: string, p: Provider, secret = env.GI
     } finally { await db.prepare('UPDATE oauth_connections SET refresh_lock=NULL,refresh_until=NULL WHERE id=? AND refresh_lock=?').bind(row.id, lease).run(); }
 }
 export type ProviderRepository = { id: string; name: string; remote: string; branch: string; private: boolean };
-export async function repositories(user: string, p: Provider, page = 1): Promise<{ repositories: ProviderRepository[]; nextPage: number | null }> {
+export async function repositories(user: string, p: Provider, page = 1, owner?: string): Promise<{ repositories: ProviderRepository[]; nextPage: number | null }> {
     insist(Number.isInteger(page) && page >= 1 && page <= 1000, 'invalid_page', 'Invalid repository page.', 400);
     const token = await connectionToken(user, p);
-    const data = await providerJSON(p === 'github' ? `https://api.github.com/user/repos?affiliation=owner&per_page=100&page=${page}&sort=updated` : `https://gitlab.com/api/v4/projects?owned=true&min_access_level=30&per_page=100&page=${page}&order_by=last_activity_at`, token);
+    let githubURL = '';
+    if (p === 'github') {
+        const account = await connection(user, p);
+        owner ??= account!.username;
+        insist(validGitHubLogin(owner), 'invalid_owner', 'Select a GitHub organization or personal account.', 400);
+        if (owner.toLowerCase() === account!.username.toLowerCase()) {
+            githubURL = `https://api.github.com/user/repos?affiliation=owner&per_page=100&page=${page}&sort=updated`;
+        } else {
+            const membership = await providerJSON(`https://api.github.com/user/memberships/orgs/${encodeURIComponent(owner)}`, token);
+            insist(membership && typeof membership === 'object' && 'state' in membership && membership.state === 'active', 'invalid_owner', 'Select an organization you belong to. Reconnect GitHub if organization access has changed.', 403);
+            githubURL = `https://api.github.com/orgs/${encodeURIComponent(owner)}/repos?type=all&per_page=100&page=${page}&sort=updated`;
+        }
+    }
+    const data = await providerJSON(p === 'github' ? githubURL : `https://gitlab.com/api/v4/projects?owned=true&min_access_level=30&per_page=100&page=${page}&order_by=last_activity_at`, token);
     insist(Array.isArray(data), 'provider_response', 'The provider returned an invalid repository list.', 502);
     const result = data.flatMap(value => {
         if (!value || typeof value !== 'object') return [];
         if (p === 'github') {
-            if (value.owner?.type !== 'User' || value.permissions?.push !== true || value.archived || value.disabled) return [];
+            if (!['User', 'Organization'].includes(value.owner?.type) || typeof value.owner?.login !== 'string' || value.owner.login.toLowerCase() !== owner!.toLowerCase() || value.permissions?.push !== true || value.archived || value.disabled) return [];
             return [{ id: String(value.id), name: String(value.full_name), remote: String(value.clone_url), branch: String(value.default_branch || 'main'), private: value.private === true }];
         }
         if (value.namespace?.kind !== 'user' || value.archived || value.marked_for_deletion_on) return [];
         return [{ id: String(value.id), name: String(value.path_with_namespace), remote: String(value.http_url_to_repo), branch: String(value.default_branch || 'main'), private: value.visibility !== 'public' }];
     });
-    return { repositories: result, nextPage: data.length === 100 ? page + 1 : null };
+    return { repositories: result, nextPage: data.length === 100 && page < 1000 ? page + 1 : null };
+}
+
+export type GitHubOwner = { login: string; kind: 'personal' | 'organization' };
+function validGitHubLogin(value: string) { return /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/.test(value); }
+export async function githubOwners(user: string, page = 1): Promise<{ owners: GitHubOwner[]; nextOwnerPage: number | null }> {
+    insist(Number.isInteger(page) && page >= 1 && page <= 1000, 'invalid_page', 'Invalid organization page.', 400);
+    const token = await connectionToken(user, 'github'), account = await connection(user, 'github');
+    const data = await providerJSON(`https://api.github.com/user/orgs?per_page=100&page=${page}`, token);
+    insist(Array.isArray(data), 'provider_response', 'GitHub returned an invalid organization list.', 502);
+    const owners: GitHubOwner[] = page === 1 ? [{ login: account!.username, kind: 'personal' }] : [];
+    for (const value of data) {
+        if (value && typeof value.login === 'string' && validGitHubLogin(value.login)) owners.push({ login: value.login, kind: 'organization' });
+    }
+    return { owners, nextOwnerPage: data.length === 100 && page < 1000 ? page + 1 : null };
 }

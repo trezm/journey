@@ -234,3 +234,63 @@ test('native workerd OAuth callback consumes D1 state once and stores encrypted 
         const verified = await call('/verify'); assert.deepEqual(await verified.json(), { tokenHash: await oauth.hash('native-private-access') });
     } finally { await runtime.dispose(); }
 });
+
+async function seedPickerConnections() {
+    for (const [p, username] of [['github', 'octocat'], ['gitlab', 'alice']]) {
+        const id = await oauth.hash(`owner:${p}`), context = `oauth-connection:${id}:owner:${p}`;
+        sqlite.prepare('INSERT OR REPLACE INTO oauth_connections(id,user,provider,provider_user,username,credential,updated) VALUES(?,?,?,?,?,?,?)').run(id, 'owner', p, '55', username, await oauth.encrypt(JSON.stringify({ access: 'picker-private-token' }), context, secret), 1);
+    }
+}
+test('GitHub organization browsing is paginated, authenticated and scopes writable repositories', async t => {
+    const original = globalThis.fetch; t.after(() => { globalThis.fetch = original; });
+    await seedPickerConnections();
+    const calls = [];
+    const repo = (name, extra = {}) => ({ id: name, full_name: `team/${name}`, clone_url: `https://github.com/team/${name}.git`, default_branch: 'develop', owner: { type: 'Organization', login: 'team' }, permissions: { push: true }, ...extra });
+    globalThis.fetch = async (url, init) => {
+        calls.push(url); assert.match(init.headers.Authorization, /^Bearer /); assert.equal(init.redirect, 'manual');
+        const parsed = new URL(url);
+        if (parsed.pathname === '/user/orgs') return Response.json(parsed.searchParams.get('page') === '1' ? Array.from({ length: 100 }, (_, i) => ({ login: 'org-' + i })) : [{ login: 'team' }]);
+        if (parsed.pathname === '/user/memberships/orgs/team') return Response.json({ state: 'active' });
+        if (parsed.pathname === '/user/memberships/orgs/pending') return Response.json({ state: 'pending' });
+        if (parsed.pathname === '/orgs/team/repos') return Response.json([repo('write'), repo('read', { permissions: { push: false } }), repo('archive', { archived: true }), repo('disabled', { disabled: true }), repo('other', { owner: { type: 'Organization', login: 'different' } })]);
+        if (parsed.pathname === '/user/repos') { assert.equal(parsed.searchParams.get('affiliation'), 'owner'); return Response.json([repo('personal', { owner: { type: 'User', login: 'octocat' } }), repo('org')]); }
+        if (parsed.pathname === '/api/v4/projects') return Response.json([{ id: 4, namespace: { kind: 'user' }, path_with_namespace: 'alice/personal', http_url_to_repo: 'https://gitlab.com/alice/personal.git', default_branch: 'main' }, { id: 5, namespace: { kind: 'group' } }]);
+        assert.fail('Unexpected provider request: ' + url);
+    };
+    const first = await route.GET(request('/api/oauth/github?project=repo&owners=1'), context('github'));
+    const owners = await first.json(); assert.equal(first.status, 200); assert.equal(owners.owners[0].kind, 'personal'); assert.equal(owners.nextOwnerPage, 2); assert.equal(owners.owners.length, 101);
+    const last = await oauth.githubOwners('owner', 2); assert.deepEqual(last, { owners: [{ login: 'team', kind: 'organization' }], nextOwnerPage: null });
+    const listed = await route.GET(request('/api/oauth/github?project=repo&repos=1&owner=team'), context('github'));
+    assert.equal(listed.status, 200); const result = await listed.json(); assert.deepEqual(result.repositories.map(r => r.id), ['write']); assert.equal(result.repositories[0].branch, 'develop');
+    assert.deepEqual((await oauth.repositories('owner', 'github', 1, 'OCTOCAT')).repositories.map(r => r.id), ['personal']);
+    assert.deepEqual((await oauth.repositories('owner', 'gitlab')).repositories.map(r => r.id), ['4']);
+    const before = calls.length;
+    for (const query of ['owners=1&page=0', 'owners=1&page=1001', 'repos=1&owner=..%2Fevil', 'repos=1&page=1.5']) {
+        const invalid = await route.GET(request('/api/oauth/github?project=repo&' + query), context('github')); assert.equal(invalid.status, 400);
+    }
+    assert.equal(calls.length, before);
+    const denied = await route.GET(request('/api/oauth/github?project=repo&repos=1&owner=pending'), context('github')); assert.equal(denied.status, 403);
+    const unsigned = await route.GET(request('/api/oauth/github?project=repo&owners=1', { headers: { cookie: '' } }), context('github')); assert.equal(unsigned.status, 401);
+    const other = await route.GET(request('/api/oauth/github?project=repo&owners=1', { headers: { cookie: 'avc_session=other-session' } }), context('github')); assert.equal(other.status, 403);
+});
+
+test('GitHub listing continues past a full page with no writable repos, and propagates safe provider errors', async t => {
+    const original = globalThis.fetch; t.after(() => { globalThis.fetch = original; });
+    await seedPickerConnections();
+    globalThis.fetch = async () => Response.json(Array.from({ length: 100 }, () => ({ owner: { type: 'User', login: 'octocat' }, permissions: { push: false } })));
+    assert.deepEqual(await oauth.repositories('owner', 'github'), { repositories: [], nextPage: 2 });
+    globalThis.fetch = async () => new Response('secret provider details', { status: 403 });
+    const failed = await route.GET(request('/api/oauth/github?project=repo&owners=1'), context('github'));
+    assert.equal(failed.status, 403); assert(!JSON.stringify(await failed.json()).includes('secret provider details'));
+});
+
+test('OAuth GitHub transport permits writable organizations and rejects readonly, archived and disabled repos', async () => {
+    const { GitHubTransport } = await import('../lib/avc/github-transport.ts');
+    for (const type of ['Organization', 'User']) {
+        const base = { id: 1, full_name: 'team/repo', owner: { type }, permissions: { push: true } };
+        await new GitHubTransport({ owner: 'team', repo: 'repo' }, 'token', async () => Response.json(base)).authorizeRepository(true);
+        for (const extra of [{ permissions: { push: false } }, { archived: true }, { disabled: true }]) {
+            await assert.rejects(new GitHubTransport({ owner: 'team', repo: 'repo' }, 'token', async () => Response.json({ ...base, ...extra })).authorizeRepository(true), error => error.code === 'github_auth');
+        }
+    }
+});

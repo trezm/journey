@@ -126,7 +126,7 @@ export class GitHubTransport {
         insist(typeof repository.id === 'number' && typeof repository.full_name === 'string', 'github_auth', 'GitHub repository access could not be verified.', 403);
         if (oauth) {
             const permissions = repository.permissions as { push?: boolean } | undefined, owner = repository.owner as { type?: string } | undefined;
-            insist(permissions?.push === true && owner?.type === 'User' && repository.archived !== true && repository.disabled !== true, 'github_auth', 'Choose a writable personal GitHub repository.', 403);
+            insist(permissions?.push === true && (owner?.type === 'User' || owner?.type === 'Organization') && repository.archived !== true && repository.disabled !== true, 'github_auth', 'Choose a writable GitHub repository.', 403);
         }
     }
     async read(hash: string, type: 'commit' | 'tree' | 'blob'): Promise<Uint8Array> {

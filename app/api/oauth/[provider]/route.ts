@@ -1,7 +1,7 @@
 import { authorize, authenticationMode, sameOrigin } from '@/lib/avc/auth';
 import { insist, ProtocolError } from '@/lib/avc/core';
 import { syncBody } from '@/lib/avc/sync-git';
-import { configured, connection, provider, repositories, sessionBinding, startOAuth } from '@/lib/avc/oauth';
+import { configured, connection, githubOwners, provider, repositories, sessionBinding, startOAuth } from '@/lib/avc/oauth';
 
 export const dynamic = 'force-dynamic';
 type Context = { params: Promise<{ provider: string }> };
@@ -13,7 +13,7 @@ export async function GET(req: Request, context: Context) {
         insist(project, 'invalid_project', 'Select a repository first.', 400);
         const user = await authorize(req, project); insist(!user.agent, 'forbidden', 'Only the repository owner can connect a provider account.', 403);
         const current = await connection(user.id, p);
-        return Response.json({ configured: configured(p), connection: current ? { provider: p, username: current.username } : null, ...(url.searchParams.has('repos') && current ? await repositories(user.id, p, Number(url.searchParams.get('page') ?? '1')) : {}) }, { headers });
+        return Response.json({ configured: configured(p), connection: current ? { provider: p, username: current.username } : null, ...(url.searchParams.has('repos') && current ? await repositories(user.id, p, Number(url.searchParams.get('page') ?? '1'), url.searchParams.get('owner') ?? undefined) : {}), ...(url.searchParams.has('owners') && current && p === 'github' ? await githubOwners(user.id, Number(url.searchParams.get('page') ?? '1')) : {}) }, { headers });
     } catch (error) { return failure(error); }
 }
 export async function POST(req: Request, context: Context) {
