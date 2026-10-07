@@ -75,7 +75,10 @@ export async function readObjectPack(response: Uint8Array, expected: string, typ
 }
 export class GitHubTransport {
     protected api: string; protected git: string; protected token: string; protected send: typeof fetch; protected execution?: AbortSignal;
-    constructor(target: GitHubTarget, token: string, send: typeof fetch = fetch, execution?: AbortSignal) {
+    private emptyTreeCarrier: string;
+    private beforeEmptyTreePush: () => Promise<void>;
+    constructor(target: GitHubTarget, token: string, send: typeof fetch = fetch, execution?: AbortSignal, carrier = 'objects', beforePush: () => Promise<void> = async () => undefined) {
+        this.emptyTreeCarrier = branchName(`journey-transfer/${carrier}/empty-tree`); this.beforeEmptyTreePush = beforePush;
         this.token = token; this.send = send.bind(globalThis); this.execution = execution;
         this.api = `https://api.github.com/repos/${target.owner}/${target.repo}`;
         this.git = `https://github.com/${target.owner}/${target.repo}.git`;
@@ -98,7 +101,7 @@ export class GitHubTransport {
             const reset = Number(response.headers.get('x-ratelimit-reset')) * 1000, retry = Number(response.headers.get('retry-after'));
             const retryAt = Math.max(Date.now() + 300_000, Number.isFinite(reset) ? reset : 0, Number.isFinite(retry) ? Date.now() + retry * 1000 : 0);
             await response.body?.cancel();
-            throw new ProtocolError(limited ? 'github_rate_limit' : response.status === 401 || response.status === 403 ? 'github_auth' : 'github_request', `GitHub request failed (${response.status}). Check repository permissions or retry later.`, response.status === 404 ? 404 : 502, limited ? { retryAt } : undefined);
+            throw new ProtocolError(limited ? 'github_rate_limit' : response.status === 401 || response.status === 403 ? 'github_auth' : 'github_request', response.status === 422 ? 'GitHub rejected the Git data or reference update (422). Sync cannot complete until the rejected operation is corrected.' : `GitHub request failed (${response.status}). Check repository permissions or retry later.`, response.status === 404 ? 404 : 502, limited ? { retryAt } : undefined);
         }
         return response;
     }
@@ -158,6 +161,13 @@ export class GitHubTransport {
     async write(hash: string, type: 'tree' | 'blob', body: Uint8Array) {
         insist(body.length < LIMIT, 'sync_capacity', 'Git object exceeds the 8 MB cloud transfer limit.', 413);
         insist((await object(type, body)).oid === hash, 'invalid_object', 'Outgoing Git object has an invalid SHA-1.', 400);
+        if (type === 'tree' && body.length === 0) {
+            // GitHub rejects POST /git/trees with tree: []. Transfer the exact
+            // empty tree and a deterministic carrier commit through native Git.
+            // The scratch ref makes it reachable and retries tolerate a lost ACK.
+            await this.initializeTransfer(`refs/heads/${this.emptyTreeCarrier}`, this.beforeEmptyTreePush);
+            return;
+        }
         const result = type === 'blob' ? await this.json('/git/blobs', { encoding: 'base64', content: Buffer.from(body).toString('base64') }) : await this.json('/git/trees', {
             tree: parseTree(body).map(entry => ({ path: entry.name, mode: entry.mode === '40000' ? '040000' : entry.mode, type: entry.mode === '40000' ? 'tree' : entry.mode === '160000' ? 'commit' : 'blob', sha: entry.oid })),
         });

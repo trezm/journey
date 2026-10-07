@@ -88,6 +88,42 @@ test('native receive-pack accepts raw signed commit then exact empty-pack ref up
     await assert.rejects(transport.push('refs/heads/main', hash, hash), error => error.code === 'github_push');
     assert.equal(git('rev-parse', 'refs/heads/main').toString().trim(), other);
 });
+test('empty trees use bounded native Git transfer, retry lost acknowledgements and fence writes', async t => {
+    const fixture = mkdtempSync(join(tmpdir(), 'journey-empty-tree-')); t.after(() => rmSync(fixture, { recursive: true, force: true }));
+    execFileSync('git', ['init', '--bare', '--quiet', fixture]);
+    const git = (...args) => execFileSync('git', ['--git-dir=' + fixture, ...args], { stdio: ['pipe', 'pipe', 'pipe'] });
+    let pushes = 0, loseAck = true, owned = false;
+    const send = async (url, init = {}) => {
+        if (init.method === 'POST') {
+            assert(new URL(url).pathname.endsWith('/git-receive-pack'), 'must never post an empty REST tree');
+            pushes++;
+            const response = execFileSync('git', ['receive-pack', '--stateless-rpc', fixture], { input: init.body, stdio: ['pipe', 'pipe', 'pipe'] });
+            if (loseAck) { loseAck = false; throw Error('lost acknowledgement'); }
+            return new Response(response);
+        }
+        const branch = new URL(url).pathname.split('/git/ref/heads/')[1];
+        try { return Response.json({ object: { type: 'commit', sha: git('rev-parse', '--verify', 'refs/heads/' + branch).toString().trim() } }); }
+        catch { return new Response('', { status: 404 }); }
+    };
+    const transport = new GitHubTransport({ owner: 'team', repo: 'repo' }, 'token', send, undefined, 'repo/generation', async () => { assert(owned, 'lease lost'); });
+    const tree = await object('tree', new Uint8Array());
+    await assert.rejects(transport.write(tree.oid, 'tree', new Uint8Array()), /lease lost/); assert.equal(pushes, 0);
+    owned = true;
+    await assert.rejects(transport.write(tree.oid, 'tree', new Uint8Array()), /lost acknowledgement/);
+    await transport.write(tree.oid, 'tree', new Uint8Array()); assert.equal(pushes, 1);
+    assert.equal(git('cat-file', 'tree', tree.oid).length, 0);
+    assert.throws(() => git('rev-parse', '--verify', 'refs/heads/main'));
+    const commit = await makeCommit({}, undefined, 'Real empty history', 'Owner', 1000);
+    const body = commit.objects.at(-1).raw.subarray(commit.objects.at(-1).raw.indexOf(0) + 1);
+    await transport.push('refs/heads/main', null, commit.oid, body);
+    assert.equal(git('rev-parse', 'refs/heads/main').toString().trim(), commit.oid);
+    git('fsck', '--strict', '--no-reflogs');
+    const ref = 'refs/heads/journey-transfer/repo/generation/empty-tree';
+    git('update-ref', ref, commit.oid);
+    await assert.rejects(transport.write(tree.oid, 'tree', new Uint8Array()), error => error.code === 'conflict_ref_exists');
+    assert.equal(git('rev-parse', ref).toString().trim(), commit.oid);
+});
+
 test('workerd exposes bounded zlib consumption metadata required by the pack parser', async () => {
     const require = createRequire(import.meta.url);
     const { Miniflare } = await import(pathToFileURL(require.resolve('miniflare', { paths: [require.resolve('wrangler')] })).href);
@@ -231,13 +267,14 @@ test('hosted fast-forward import completes without a file/tree snapshot or token
         return next(specifier, context);
     } });
     const originalFetch = globalThis.fetch;
-    const refs = new Map([['main', incoming.oid]]); let mainPushes = 0, loseMainAck = false, replaceLeaseDuringRead = false;
+    const refs = new Map([['main', incoming.oid]]); let mainPushes = 0, loseMainAck = false, replaceLeaseDuringRead = false, importRequests = 0, moveBeforePublish = null;
     globalThis.fetch = async (url, init = {}) => {
         const path = new URL(url).pathname;
         if (path === '/repos/team/repo') return Response.json({ id: 1, full_name: 'team/repo' });
-        if (path.includes('/git/ref/heads/')) { const head = refs.get(path.split('/git/ref/heads/')[1]); return head ? Response.json({ object: { sha: head, type: 'commit' } }) : new Response('', { status: 404 }); }
+        if (path.includes('/git/ref/heads/')) { if (moveBeforePublish && decodeState(row.state).sync?.cloud.work?.phase === 'publish') { refs.set('main', moveBeforePublish); moveBeforePublish = null; } const head = refs.get(path.split('/git/ref/heads/')[1]); return head ? Response.json({ object: { sha: head, type: 'commit' } }) : new Response('', { status: 404 }); }
         if (path.endsWith('/info/refs')) return new Response('filter shallow');
         if (path.endsWith('/git-upload-pack')) {
+            importRequests++;
             const hash = /want ([a-f0-9]{40})/.exec(Buffer.from(init.body).toString())[1];
             if (replaceLeaseDuringRead) {
                 replaceLeaseDuringRead = false;
@@ -385,4 +422,75 @@ test('hosted fast-forward import completes without a file/tree snapshot or token
         const rejected = decodeState(row.state); assert.equal(rejected.head, current.head); assert.equal(rejected.sync.status, 'error'); assert.match(rejected.sync.error, /tree depth limit/);
         assert.equal(refs.get('main'), commit.oid);
     });
+    await t.test('only pristine creation history adopts a remote, including persisted failed exports', async () => {
+        const empty = await git.save({}, undefined, 'Initialize repository', 'Owner');
+        const emptyTree = await object('tree', new Uint8Array());
+        // Real empty histories can export without relying on the bootstrap rule.
+        await remoteBucket.put(remoteGit.key(emptyTree.oid), deflateSync(emptyTree.raw));
+        const { beginSync } = await import('../lib/avc/sync.ts');
+        const { emit } = await import('../lib/avc/core.ts');
+        const fixture = () => {
+            const state = { id: 'repo', name: 'Repo', head: empty.oid, revisions: { [empty.oid]: empty.meta }, journeys: [], leases: [], waiting: [], events: [], sequence: 0, integrationCursor: 0, generation: 0, receipts: {}, requireApproval: true };
+            emit(state, 'repository.created', 'owner', { name: 'Repo', revision: empty.oid });
+            state.sync = { remote: 'https://github.com/team/repo.git', branch: 'main', enabled: true, status: 'idle', updatedAt: 1, cloud: { credential, generation: 'bootstrap-generation' } };
+            return state;
+        };
+        const settle = async () => {
+            for (let i = 0; i < 10; i++) {
+                await runCloudSync('repo', key);
+                const state = decodeState(row.state);
+                if (state.sync.status !== 'running') return state;
+            }
+            assert.fail('sync did not settle');
+        };
+        const failed = state => {
+            const run = beginSync(state, { runId: crypto.randomUUID(), expectedHead: empty.oid, remoteHead: incoming.oid, expectedRemote: state.sync.remote, expectedBranch: 'main' }, { id: 'cloud-github-sync', agent: false });
+            state.sync.status = 'error'; state.sync.error = 'GitHub request failed (422).';
+            state.sync.cloud.work = { phase: 'export', remote: incoming.oid, original: empty.oid, preserve: true, todo: [{ hash: empty.oid, type: 'commit', expanded: true }, { hash: emptyTree.oid, type: 'tree' }], seen: [] };
+            return run;
+        };
+        for (const resumed of [false, true]) {
+            refs.set('main', incoming.oid); const start = fixture();
+            const run = resumed ? failed(start) : null;
+            const reads = importRequests, pushes = mainPushes; row.state = encodeState(start);
+            const result = await settle();
+            assert.equal(result.head, incoming.oid); assert.equal(result.sync.status, 'idle'); assert.equal(result.sync.run, undefined);
+            assert(Object.values(result.sync.backupRefs).includes(empty.oid));
+            assert.equal(refs.get('main'), incoming.oid); assert.equal(mainPushes, pushes);
+            if (resumed) { assert.equal(importRequests, reads); assert.equal(result.sync.lastRunId, run.id); }
+        }
+        const variants = [
+            ['imported', state => { state.imported = { session: 'import', head: empty.oid, refs: {}, objectCount: 2, at: 1 }; }],
+            ['wrong creation revision', state => { state.events[0].data.revision = incoming.oid; }],
+            ['missing creation event', state => { state.events = []; }],
+            ['integration history', state => { state.integrationCursor = 5; }],
+            ['previously synced', state => { state.sync.lastSyncedHead = empty.oid; }],
+            ['journey history', state => { state.journeys = [{ id: 'old', status: 'abandoned', reviews: [], changesets: [] }]; }],
+            ['changed metadata', state => { state.revisions[empty.oid].actor = 'Another author'; }],
+            ['additional revision', state => { state.revisions[incoming.oid] = incoming.meta; }],
+        ];
+        for (const [label, change] of variants) {
+            refs.set('main', incoming.oid); const start = fixture();
+            // Clone metadata, since the negative tests intentionally modify it.
+            start.revisions = structuredClone(start.revisions); change(start); row.state = encodeState(start);
+            const result = await settle();
+            assert.equal(result.sync.status, 'conflict', label); assert.equal(result.head, empty.oid, label);
+            assert.equal(refs.get(result.sync.run.conflictBranch), empty.oid, label); assert.equal(refs.get('main'), incoming.oid, label);
+        }
+        // Even an empty tip with creation-like metadata is not disposable if it
+        // actually has parents (e.g. someone deleted all files).
+        const deleted = await git.save({}, incoming.oid, 'Initialize repository', 'Owner');
+        const edited = fixture(); edited.head = deleted.oid; edited.events[0].data.revision = deleted.oid;
+        edited.revisions = { [deleted.oid]: { ...deleted.meta, parent: undefined } }; row.state = encodeState(edited); refs.set('main', remoteSibling.oid);
+        const kept = await settle(); assert.equal(kept.sync.status, 'conflict'); assert.equal(kept.head, deleted.oid);
+        assert.equal(refs.get(kept.sync.run.conflictBranch), deleted.oid);
+        // A new remote revision between staging and publication is never replaced
+        // by the previously imported candidate. The next run imports the new tip.
+        const moved = fixture(); failed(moved); row.state = encodeState(moved); refs.set('main', incoming.oid); moveBeforePublish = outgoing.oid;
+        const pushes = mainPushes, stale = await settle();
+        assert.equal(stale.head, empty.oid); assert.equal(refs.get('main'), outgoing.oid); assert.equal(mainPushes, pushes);
+        delete stale.sync.cloud.nextAttemptAt; row.state = encodeState(stale);
+        const recovered = await settle(); assert.equal(recovered.head, outgoing.oid); assert.equal(recovered.sync.status, 'idle');
+    });
+
 });

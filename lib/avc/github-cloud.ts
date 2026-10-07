@@ -1,6 +1,6 @@
 import { syncView } from './sync-view.ts';
 import { deflateSync } from 'node:zlib';
-import { GitStore, object, parseTree, references } from './git.ts';
+import { GitStore, makeCommit, object, parseTree, references } from './git.ts';
 import { providerTransport, remoteProvider } from './provider-transport.ts';
 import { connectionToken, encrypt } from './oauth.ts';
 import { emit, insist, notifyWaiters, ProtocolError, type State } from './core.ts';
@@ -77,6 +77,19 @@ function remember(work: CloudWork, hash: string) {
     insist(work.seen.length <= MAX_OBJECTS && work.todo.length <= MAX_OBJECTS, 'sync_capacity', 'Cloud sync exceeds 50,000 objects; heads are preserved.', 413);
 }
 function seenKey(work: CloudWork, item: Item) { return work.phase === 'import' && item.type === 'tree' ? `${item.hash}:${item.depth ?? 0}:${item.path ?? ''}` : item.hash; }
+// Only the exact, never-used creation revision is a disposable bootstrap.
+// An empty imported root or a later commit deleting all files is real history.
+function pristineBootstrap(state: State, work: CloudWork) {
+    const created = state.events[0], meta = state.revisions[work.original];
+    return state.head === work.original && state.integrationCursor === 0 &&
+        !state.imported && !state.importSession && state.journeys.length === 0 &&
+        state.leases.length === 0 && state.waiting.length === 0 &&
+        Object.keys(state.revisions).length === 1 && !!meta && !meta.parent &&
+        meta.message === 'Initialize repository' && Number.isFinite(meta.at) &&
+        created?.type === 'repository.created' && created.id === 1 && created.data.revision === work.original &&
+        !state.sync?.lastSyncedHead && !state.sync?.lastCompletedHead &&
+        !Object.keys(state.sync?.receipts ?? {}).length;
+}
 export function publicSync(state: State) {
     if (!state.sync) return null;
     return syncView(state.sync);
@@ -136,6 +149,24 @@ export async function runCloudSync(project: string, key: string) {
             if (state.sync?.status === 'conflict') break;
             const owned = fence(state, token, ownedGeneration), work = owned.work;
             if (!work) break;
+            // Reaching ancestry/export proves the import closure finished, including
+            // old persisted runs that failed exporting the empty bootstrap tree.
+            if (work.remote && (work.phase === 'remote-ancestry' || work.phase === 'journey-ancestry' || (work.phase === 'export' && work.preserve)) && pristineBootstrap(state, work)) {
+                const meta = state.revisions[work.original];
+                const bootstrap = await makeCommit({}, undefined, meta.message, meta.actor, meta.at);
+                if (bootstrap.oid === work.original) {
+                    await mutate(project, state => {
+                        const current = fence(state, token, ownedGeneration).work!;
+                        const run = currentSyncRun(state, state.sync!.run!.id, actor);
+                        insist(pristineBootstrap(state, current) && current.original === work.original && current.remote === work.remote && run.remoteHead === current.remote && run.phase === 'preparing', 'sync_progress_changed', 'Bootstrap sync changed.', 409);
+                        // beginSync already keeps the original commit as a backup.
+                        state.sync!.backupRefs![`refs/heads/journey-sync/${run.id}/remote`] = current.remote!;
+                        current.phase = 'publish'; current.candidate = current.remote!; current.todo = []; current.seen = []; delete current.preserve;
+                        run.prepared = true; stageSync(state, run, current.candidate, {});
+                    });
+                    continue;
+                }
+            }
             if (work.phase === 'export' && work.remote === null && !work.initialized) {
                 // GitHub Git database APIs reject genuinely empty repositories.
                 // A two-object empty-tree bootstrap touches only our scratch ref;
