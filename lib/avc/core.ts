@@ -1,3 +1,4 @@
+import { syncView } from './sync-view.ts';
 import type { SyncState } from './sync.ts';
 export type Files = Record<string, string>;
 export type Hunk = {
@@ -374,7 +375,7 @@ export function finalizeIntegration(s: State, j: Journey, revision: string, acto
     notifyWaiters(s);
     return event;
 }
-export function publicState(s: State, actor: string, agent = false) { return { ...s, ...repositoryPolicy(s), leases: s.leases.map(l => ({ ...l, token: !agent || s.journeys.find(j => j.id === l.journey)?.actor === actor ? l.token : undefined })), receipts: undefined }; }
+export function publicState(s: State, actor: string, agent = false) { return { ...s, sync: s.sync ? syncView(s.sync) : undefined, ...repositoryPolicy(s), leases: s.leases.map(l => ({ ...l, token: !agent || s.journeys.find(j => j.id === l.journey)?.actor === actor ? l.token : undefined })), receipts: undefined }; }
 
 export type Reviewer = { id: string; agent: boolean; role?: string };
 export function repositoryPolicy(s: State) { return { requireApproval: s.requireApproval, allowWorkerMerge: s.allowWorkerMerge ?? true, allowCoordinatorApproval: s.allowCoordinatorApproval ?? false }; }

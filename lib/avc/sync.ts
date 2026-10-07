@@ -20,6 +20,9 @@ export type SyncRun = {
 };
 export type SyncState = {
     hosted?: true;
+    /** Public, phase-local counters; the queue can grow as history is discovered. */
+    progress?: { phase: import('./github-cloud.ts').CloudWork['phase']; objects: number; pending: number } | null;
+    nextAttemptAt?: number;
     cloud?: { credential: string; generation: string; lease?: { token: string; until: number }; work?: import('./github-cloud.ts').CloudWork; nextAttemptAt?: number; failures?: number };
     remote: string;
     branch: string;

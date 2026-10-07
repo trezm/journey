@@ -40,3 +40,12 @@
 :global(.dark) .reference button:hover { background: #4a3a2a; }
 :global(.dark) .resume input { background: #182335; border-color: #69563e; color: #e6edf7; }
 :global(.dark) .error { color: #ffaaa3; }
+
+.transfer { margin-top:18px; padding-top:16px; border-top:1px solid currentColor; }
+.phase { font-size:13px; line-height:1.6; color:inherit; }
+.counters { display:flex; flex-wrap:wrap; gap:16px 40px; margin:12px 0; }
+.counters dt { font-size:12px; line-height:1.5; }
+.counters dd { margin:2px 0 0; font-size:25px; line-height:1.2; font-weight:600; font-variant-numeric:tabular-nums; }
+.spinning { animation:sync-spin 1.6s linear infinite; }
+@keyframes sync-spin { to { transform:rotate(360deg); } }
+@media(prefers-reduced-motion:reduce) { .spinning { animation:none; } }

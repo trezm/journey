@@ -1,3 +1,4 @@
+import { syncView } from './sync-view.ts';
 import { deflateSync } from 'node:zlib';
 import { GitStore, object, parseTree, references } from './git.ts';
 import { providerTransport, remoteProvider } from './provider-transport.ts';
@@ -78,8 +79,7 @@ function remember(work: CloudWork, hash: string) {
 function seenKey(work: CloudWork, item: Item) { return work.phase === 'import' && item.type === 'tree' ? `${item.hash}:${item.depth ?? 0}:${item.path ?? ''}` : item.hash; }
 export function publicSync(state: State) {
     if (!state.sync) return null;
-    const { cloud, ...sync } = state.sync;
-    return { ...sync, ...(cloud ? { hosted: true, progress: cloud.work ? { phase: cloud.work.phase, objects: cloud.work.seen.length, pending: cloud.work.todo.length } : null, nextAttemptAt: cloud.nextAttemptAt } : {}) };
+    return syncView(state.sync);
 }
 async function finish(project: string, token: string, generation: string, candidate: string, git: GitStore) {
     const meta = await syncCommitMeta(git, candidate);

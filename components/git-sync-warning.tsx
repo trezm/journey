@@ -30,9 +30,18 @@ export function GitSyncWarning({ project, sync, editable, onRefresh }: Props) {
     const [error, setError] = useState('');
     const [notice, setNotice] = useState('');
     const run = sync?.run;
-    if (!sync || (!run && sync.status !== 'error')) return null;
+    if (!sync || (!run && sync.status !== 'error' && !(sync.enabled && sync.status === 'running'))) return null;
     const conflict = !!run && (run.phase === 'conflict' || !!run.conflicts?.length);
     const resolving = run?.phase === 'resolving';
+    const active = sync.enabled && sync.status === 'running' && !conflict;
+    const progress = sync.hosted ? sync.progress : null;
+    const phase = progress ? {
+        import: 'Importing Git history',
+        'remote-ancestry': 'Checking remote history',
+        'journey-ancestry': 'Checking Journey history',
+        export: 'Uploading Git history',
+        publish: 'Publishing synchronized revision',
+    }[progress.phase] : resolving ? 'Applying your Git resolution' : run?.phase === 'publishing' ? 'Publishing synchronized revision' : 'Preparing Git sync';
     async function resume(event: React.FormEvent) {
         event.preventDefault();
         if (!run || !editable || busy || !/^[a-f0-9]{40}$/i.test(head.trim())) return;
@@ -48,13 +57,23 @@ export function GitSyncWarning({ project, sync, editable, onRefresh }: Props) {
     }
     return <section className={`${styles.warning} ${!conflict && sync.status !== 'error' ? styles.progress : ''}`} aria-label="Git sync status">
         <div className={styles.heading} role={conflict || sync.status === 'error' ? 'alert' : 'status'}>
-            {conflict || sync.status === 'error' ? <AlertTriangle size={21}/> : <RefreshCw size={20}/>}
-            <div><h2>{resolving ? 'Applying your Git resolution' : conflict ? 'Git conflict: repository paused' : run ? 'Repository paused for Git sync' : 'Git sync needs attention'}</h2>
-                <p>{run ? 'Writes to this repository are paused. You can still inspect and export its history.' : 'Synchronization could not finish. Check the configured sync service and credentials; both heads are preserved.'}</p>
+            {conflict || sync.status === 'error' ? <AlertTriangle size={21}/> : <RefreshCw size={20} className={active ? styles.spinning : undefined} aria-hidden="true"/>}
+            <div><h2>{sync.status === 'error' && !conflict ? 'Git sync needs attention' : active && sync.hosted ? phase : resolving ? 'Applying your Git resolution' : conflict ? 'Git conflict: repository paused' : run ? 'Repository paused for Git sync' : 'Git sync needs attention'}</h2>
+                <p>{run ? 'Writes to this repository are paused. You can still inspect and export its history.' : active ? 'Synchronization is running. Progress refreshes automatically.' : 'Synchronization could not finish. Check the configured sync service and credentials; both heads are preserved.'}</p>
             </div>
         </div>
         {sync.error && <p className={styles.error}>{sync.error}</p>}
-        {run && !conflict && !resolving && <p className={styles.detail}>Automatic synchronization will finish {run.phase === 'publishing' ? 'publishing the synchronized commits' : 'checking and preparing the remote changes'}. {sync.hosted ? 'Interrupted work resumes automatically.' : 'Restart an interrupted run with its original connection file.'} Sync resumes after this operation completes.</p>}
+        {progress && <div className={styles.transfer}>
+            <p className={styles.phase}>{active ? 'Current phase' : 'Saved progress'}: <strong>{phase}</strong></p>
+            <dl className={styles.counters} aria-live="polite" aria-atomic="true">
+                <div><dt>Processed in this phase</dt><dd>{progress.objects.toLocaleString('en-US')}</dd></div>
+                <div><dt>Currently queued</dt><dd>{progress.pending.toLocaleString('en-US')}</dd></div>
+            </dl>
+            <p className={styles.detail}>Counts cover the current phase and reset when the phase changes. The queue can grow as more history is discovered, so the total is not known in advance.</p>
+            {active && <p className={styles.detail}>Progress refreshes automatically. The repository’s visible revision updates when synchronization finishes.</p>}
+            {!active && <p className={styles.detail}>These are the last saved counts; synchronization needs attention before it can finish.</p>}
+        </div>}
+        {run && active && !resolving && !progress && <p className={styles.detail}>Automatic synchronization will finish {run.phase === 'publishing' ? 'publishing the synchronized commits' : 'checking and preparing the remote changes'}. {sync.hosted ? 'Interrupted work resumes automatically.' : 'Restart an interrupted run with its original connection file.'} Sync resumes after this operation completes.</p>}
         {run && (conflict || resolving) && <>
             <dl className={styles.references}>
                 <Reference label="Preserved Journey head" value={run.journeyHead} href={`/api/avc?project=${encodeURIComponent(project)}&revision=${encodeURIComponent(run.journeyHead)}`}/>
