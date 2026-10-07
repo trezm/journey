@@ -18,6 +18,13 @@ async function legacyActorRoles(project: string) {
     const rows = await bindings().db.prepare('SELECT digest,role FROM agents WHERE project=?').bind(project).all<{ digest: string; role: string }>();
     return Object.fromEntries(rows.results.map(row => ['agent:' + row.digest.slice(0, 16), row.role]));
 }
+async function revisionSource(git: GitStore, revision: string, url: URL) {
+    const source = url.searchParams.get('source'), path = url.searchParams.get('path') ?? '';
+    if (source === 'tree') return { entries: await git.sourceTree(revision, path) };
+    if (source === 'file') return { file: await git.sourceFile(revision, path) };
+    insist(source === null, 'invalid_source', 'Unknown source request.', 400);
+    return { files: await git.files(revision) };
+}
 export async function GET(req: Request) {
     try {
         const url = new URL(req.url);
@@ -31,7 +38,7 @@ export async function GET(req: Request) {
             if (revision) {
                 const git = new GitStore(bindings().bucket, id);
                 insist(await acceptedRevision(git, row.state.head, revision), 'revision_not_found', 'Revision is not part of the accepted repository history.', 404);
-                return responseJson({ revision, files: await git.files(revision) });
+                return responseJson({ revision, ...await revisionSource(git, revision, url) });
             }
             return responseJson({ state: readerState(row.state), project, user });
         }
@@ -46,7 +53,7 @@ export async function GET(req: Request) {
         const revision = url.searchParams.get('revision');
         if (revision) {
             insist(row.state.revisions[revision] || Object.values(row.state.sync?.backupRefs ?? {}).includes(revision), 'revision_not_found', 'Revision is not part of this repository.', 404);
-            return responseJson({ revision, files: await git.files(revision) });
+            return responseJson({ revision, ...await revisionSource(git, revision, url) });
         }
         const journey = url.searchParams.get('journey');
         if (journey) {

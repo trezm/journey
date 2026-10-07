@@ -54,6 +54,12 @@ test('repository routes isolate two accounts, safely expose public main, and rev
         const publicRead = await get(who), serialized = JSON.stringify({ state: publicRead.state, project: publicRead.project });
         for (const privateValue of ['Private work', 'Private draft', 'secret-journey', 'private command output', 'private receipt', 'private.example', 'private@example.test', draft.oid]) assert(!serialized.includes(privateValue), privateValue);
         assert.equal(publicRead.project.permissions.write, false);
+        const tree = await get(who, '&revision=' + initial.oid + '&source=tree'); assert.equal(tree.entries[0].name, 'README.md');
+        const source = await get(who, '&revision=' + initial.oid + '&source=file&path=README.md'); assert.deepEqual(source.file, { kind: 'text', content: 'Accepted code' });
+        await get(who, '&revision=' + draft.oid + '&source=tree', 404);
+        await get(who, '&revision=' + draft.oid + '&source=file&path=secret.txt', 404);
+        await get(who, '&revision=' + initial.oid + '&source=file&path=../secret.txt', 400);
+        await get(who, '&revision=' + initial.oid + '&source=file&path=missing.txt', 404);
         const files = await get(who, '&revision=' + initial.oid); assert.equal(files.files['README.md'], 'Accepted code');
         await get(who, '&revision=' + draft.oid, 404); await get(who, '&journey=secret-journey', 403); await get(who, '&approvals=1', 403); await get(who, '&live=1', 403);
         const refs = await (await gitGet(who, 'info/refs', 200)).text(); assert.equal(refs, `${initial.oid}\trefs/heads/main\n`);
@@ -66,6 +72,9 @@ test('repository routes isolate two accounts, safely expose public main, and rev
     for (const authorization of ['Bearer invalid', 'Basic invalid', 'Bearer', 'Other invalid']) { await get('alice', '', 401, { Authorization: authorization }); await gitGet('alice', 'HEAD', 401, { Authorization: authorization }); }
     await get(undefined, '', 404, { Authorization: 'Bearer other-agent' });
     assert.equal((await get('alice')).project.permissions.write, true);
+    assert.equal((await get('alice', '&revision=' + draft.oid + '&source=file&path=secret.txt')).file.content, 'Unpublished draft');
+    await get('alice', '&revision=' + 'a'.repeat(40) + '&source=tree', 404);
+    await get('alice', '&revision=' + initial.oid + '&source=unknown', 400);
     await gitGet('alice', objectPath(draft.oid), 200);
     await mutation('alice', 'visibility', { visibility: 'private' });
     for (const who of ['bob', undefined]) { await get(who, '', 404); await gitGet(who, objectPath(initial.oid), 404); assert.deepEqual((await list(who)).projects, []); }

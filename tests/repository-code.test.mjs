@@ -142,6 +142,7 @@ function renderCodeWorkspace(options = {}) {
         if (name === '@/lib/avc/core') return { isCanonicalUpdate };
         if (name === '@/lib/avc/client') return { ...requestHelpers, jsonFetch: options.requestJson ?? requestHelpers.jsonFetch };
         if (name === '@/components/patch-viewer') return { PatchViewer: () => null };
+        if (name === '@/components/repository-source') return { RepositorySource: props => React.createElement('pre', { 'data-revision': props.revision }, 'Imported repository code') };
         if (name === '@/components/repository-code-panel') return { RepositoryCodePanel: props => React.createElement('pre', { 'data-revision': props.revision }, props.content) };
         if (name === '@/components/repository-picker') return { RepositoryPicker: () => null };
         if (name === '@/components/ui/button') return { Button: ({ children, ...props }) => { options.onButton?.({ children, ...props }); return React.createElement('button', props, children); } };
@@ -277,3 +278,11 @@ test('dedicated journey and changeset pages never substitute a missing changeset
     assert.doesNotMatch(overview, /Whole journeys integrate|Every step stays recorded/);
     assert.match(renderCodeWorkspace({ tab: 'journeys' }), /Journeys index/);
 });
+
+ test('repository source browsing never requests a full snapshot; journey editing retains snapshots', () => {
+    const requests = [];
+    renderCodeWorkspace({ onFiles: project => requests.push(project) });
+    assert.deepEqual(requests, ['']);
+    renderCodeWorkspace({ mode: 'journey', selected: 'j', journeys: [{ id: 'j', head: 'branch', changesets: [], status: 'working' }], onFiles: project => requests.push(project) });
+    assert.equal(requests.at(-1), 'repo');
+ });

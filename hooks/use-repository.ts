@@ -41,3 +41,18 @@ export function useRepositoryFiles(project: string, revision: string | undefined
     const resource = useResource(project && revision ? `${project}:${revision}` : '', fetchFiles);
     return { ...resource, files: resource.data?.files ?? EMPTY_FILES };
 }
+
+const fetchSourceTree = (key: string, signal: AbortSignal) => {
+    const [project, revision, path] = JSON.parse(key) as string[];
+    return fetchJson<{ entries: import('@/lib/avc/git').SourceEntry[] }>(`/api/avc?${new URLSearchParams({ project, revision, source: 'tree', path })}`, signal);
+};
+const fetchSourceFile = (key: string, signal: AbortSignal) => {
+    const [project, revision, path] = JSON.parse(key) as string[];
+    return fetchJson<{ file: import('@/lib/avc/git').SourceFile }>(`/api/avc?${new URLSearchParams({ project, revision, source: 'file', path })}`, signal);
+};
+export function useSourceTree(project: string, revision: string | undefined, path: string) {
+    return useResource(project && revision ? JSON.stringify([project, revision, path]) : '', fetchSourceTree);
+}
+export function useSourceFile(project: string, revision: string | undefined, path: string) {
+    return useResource(project && revision && path ? JSON.stringify([project, revision, path]) : '', fetchSourceFile);
+}

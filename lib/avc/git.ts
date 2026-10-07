@@ -4,6 +4,8 @@ const utf8 = new TextEncoder();
 const decoder = new TextDecoder('utf-8', { fatal: true });
 export type Entry = { mode: string; oid: string };
 export type Entries = Record<string, Entry>;
+export type SourceFile = { kind: 'text'; content: string } | { kind: 'binary' | 'large' | 'symlink' | 'submodule' };
+export type SourceEntry = Entry & { name: string };
 export function concatenate(...chunks: Uint8Array[]) { const out = new Uint8Array(chunks.reduce((n, c) => n + c.length, 0)); let i = 0; for (const c of chunks) { out.set(c, i); i += c.length; } return out; }
 export async function object(type: string, body: Uint8Array) { const raw = concatenate(utf8.encode(`${type} ${body.length}\0`), body); const oid = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-1', raw))).map(b => b.toString(16).padStart(2, '0')).join(''); return { oid, raw }; }
 export function validPath(path: string) { return path.length <= 1000 && !/[\x00-\x1f\\]/.test(path) && path.split('/').every(p => p && p !== '.' && p !== '..' && p.toLowerCase() !== '.git'); }
@@ -85,6 +87,46 @@ export class GitStore {
     constructor(bucket: R2Bucket, project: string) { this.bucket = bucket; this.project = project; }
     key(oid: string) { insist(/^[a-f0-9]{40}$/.test(oid), 'invalid_revision', 'Invalid Git object hash.', 400); return `${this.project}/objects/${oid.slice(0, 2)}/${oid.slice(2)}`; }
     async read(oid: string) { const stored = await this.bucket.get(this.key(oid)); insist(stored, 'object_missing', `Git object ${oid} is missing.`, 404); return decodeObject(new Uint8Array(await stored.arrayBuffer())); }
+    // Browsing follows only the requested path. Never materialize the repository snapshot.
+    private async sourceEntry(oid: string, path: string): Promise<Entry> {
+        insist(!path || validPath(path), 'invalid_path', 'Use relative file paths without traversal.', 400);
+        const parts = path ? path.split('/') : [];
+        insist(parts.length <= 40, 'tree_capacity', 'Repository path exceeds browsing limits.', 413);
+        const commit = await this.read(oid);
+        insist(commit.type === 'commit', 'invalid_revision', 'Expected a Git commit.', 400);
+        const tree = /^tree ([a-f0-9]{40})$/m.exec(new TextDecoder().decode(commit.body))?.[1];
+        insist(tree, 'invalid_commit', 'Commit has no tree.', 400);
+        let entry: Entry = { mode: '40000', oid: tree };
+        for (const part of parts) {
+            insist(entry.mode === '40000', 'path_not_found', 'Path is not a directory.', 404);
+            const data = await this.read(entry.oid);
+            insist(data.type === 'tree', 'invalid_tree', 'Expected a tree object.', 400);
+            const next = parseTree(data.body).find(candidate => candidate.name === part);
+            insist(next, 'path_not_found', 'Path does not exist in this revision.', 404);
+            entry = next;
+        }
+        return entry;
+    }
+    async sourceTree(oid: string, path = ''): Promise<SourceEntry[]> {
+        const entry = await this.sourceEntry(oid, path);
+        insist(entry.mode === '40000', 'not_directory', 'Expected a directory.', 400);
+        const data = await this.read(entry.oid);
+        insist(data.type === 'tree', 'invalid_tree', 'Expected a tree object.', 400);
+        return parseTree(data.body).sort((a, b) => Number(b.mode === '40000') - Number(a.mode === '40000') || a.name.localeCompare(b.name));
+    }
+    async sourceFile(oid: string, path: string): Promise<SourceFile> {
+        insist(path, 'invalid_path', 'A file path is required.', 400);
+        const entry = await this.sourceEntry(oid, path);
+        if (entry.mode === '120000') return { kind: 'symlink' };
+        if (entry.mode === '160000') return { kind: 'submodule' };
+        insist(['100644', '100755'].includes(entry.mode), 'not_file', 'Expected a file.', 400);
+        const blob = await this.read(entry.oid);
+        insist(blob.type === 'blob', 'invalid_blob', 'Expected a blob.', 400);
+        if (blob.body.length > 500000) return { kind: 'large' };
+        if (blob.body.includes(0)) return { kind: 'binary' };
+        try { return { kind: 'text', content: decoder.decode(blob.body) }; }
+        catch { return { kind: 'binary' }; }
+    }
     async entries(oid: string): Promise<Entries> {
         const cached = await this.bucket.get(`${this.project}/trees/${oid}`); if (cached) return JSON.parse(await cached.text());
         const commit = await this.read(oid); insist(commit.type === 'commit', 'invalid_revision', 'Expected a Git commit.', 400);

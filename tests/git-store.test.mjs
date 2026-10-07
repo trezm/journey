@@ -144,3 +144,48 @@ test('imported trees with empty directories never reuse nonexistent reconstructe
     assert.equal((await git.read(tree)).type, 'tree');
     assert.deepEqual(await git.files(saved.oid), { 'README.md': 'Imported\n' });
 });
+
+test('cold source browsing reads only the requested directory and blob in a large import', async () => {
+    const bucket = new MemoryBucket(), git = new GitStore(bucket, 'browse');
+    const files = Object.fromEntries(Array.from({ length: 871 }, (_, i) => [`dir-${i % 198}/file-${i}.txt`, `File ${i}\n`]));
+    files['README.md'] = '';
+    const commit = await makeCommit(files, undefined, 'Import', 'Test');
+    for (const obj of commit.objects) bucket.data.set(git.key(obj.oid), deflateSync(obj.raw));
+    const reads = [], get = bucket.get.bind(bucket);
+    bucket.get = async key => { reads.push(key); return get(key); };
+    const tree = await git.sourceTree(commit.oid);
+    assert.equal(tree.length, 199);
+    assert.equal(reads.length, 2, 'one commit and root tree, independent of repository size');
+    assert.equal(bucket.writes.length, 0, 'browsing does not build a snapshot or tree index');
+    reads.length = 0;
+    assert.deepEqual(await git.sourceFile(commit.oid, 'README.md'), { kind: 'text', content: '' });
+    assert.equal(reads.length, 3);
+    reads.length = 0;
+    assert.deepEqual(await git.sourceFile(commit.oid, 'dir-0/file-0.txt'), { kind: 'text', content: 'File 0\n' });
+    assert.equal(reads.length, 4);
+    reads.length = 0;
+    assert((await git.sourceTree(commit.oid, 'dir-0')).length > 0);
+    assert.equal(reads.length, 3);
+    for (const path of ['../README.md', '/README.md', '.git/config', 'dir-0//file-0.txt'])
+        await assert.rejects(git.sourceFile(commit.oid, path), error => error.code === 'invalid_path');
+    await assert.rejects(git.sourceFile(commit.oid, 'dir-0'), error => error.code === 'not_file');
+    await assert.rejects(git.sourceFile(commit.oid, 'missing'), error => error.code === 'path_not_found');
+    await assert.rejects(git.sourceTree(commit.oid, 'README.md'), error => error.code === 'not_directory');
+});
+
+test('source previews identify binary, invalid UTF-8, large, symlink and submodule entries honestly', async () => {
+    const bucket = new MemoryBucket(), git = new GitStore(bucket, 'special'), entries = {};
+    for (const [path, body, mode] of [
+        ['binary', new Uint8Array([65, 0, 66]), '100644'],
+        ['invalid', new Uint8Array([255]), '100644'],
+        ['large', new Uint8Array(500001).fill(65), '100644'],
+        ['link', new TextEncoder().encode('somewhere'), '120000'],
+    ]) {
+        const blob = await object('blob', body); bucket.data.set(git.key(blob.oid), deflateSync(blob.raw)); entries[path] = { mode, oid: blob.oid };
+    }
+    entries.submodule = { mode: '160000', oid: 'a'.repeat(40) };
+    const commit = await makeCommit({}, undefined, 'Special', 'Test', Date.now(), entries);
+    for (const obj of commit.objects) bucket.data.set(git.key(obj.oid), deflateSync(obj.raw));
+    for (const [path, kind] of [['binary', 'binary'], ['invalid', 'binary'], ['large', 'large'], ['link', 'symlink'], ['submodule', 'submodule']])
+        assert.deepEqual(await git.sourceFile(commit.oid, path), { kind });
+});
