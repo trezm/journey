@@ -1,6 +1,7 @@
 'use client';
 
-import { useId, useState } from 'react';
+import { useId, useRef, useState, type MouseEvent } from 'react';
+import { ArrowLeft, ArrowRight } from 'lucide-react';
 import type { Changeset, Journey } from '@/lib/avc/core';
 import { changesetCommentTarget, changesetDiscussion, type ChangesetCommentTarget } from '@/lib/changeset-detail';
 import { PatchViewer } from './patch-viewer';
@@ -12,20 +13,29 @@ type Props = {
     changeset: Changeset;
     onComment: (target: ChangesetCommentTarget) => Promise<boolean>;
     canComment?: boolean;
+    hrefForChangeset: (id: string) => string;
+    onNavigateChangeset: (event: MouseEvent<HTMLAnchorElement>, id: string) => void;
 };
 
 export function ChangesetDetail(props: Props) {
     return <ChangesetContents key={`${props.project}:${props.journey.id}:${props.changeset.id}`} {...props}/>;
 }
 
-function ChangesetContents({ project, journey, changeset, onComment, canComment = true }: Props) {
+function ChangesetContents({ project, journey, changeset, onComment, canComment = true, hrefForChangeset, onNavigateChangeset }: Props) {
     const [draft, setDraft] = useState('');
     const [pending, setPending] = useState(false);
     const [error, setError] = useState('');
     const inputId = useId();
+    const headingRef = useRef<HTMLElement>(null);
     const reviews = changesetDiscussion(journey.reviews, changeset);
     const fileCount = new Set(changeset.patches.flatMap(patch => patch.changes.map(change => change.path))).size;
     const number = journey.changesets.findIndex(item => item.id === changeset.id) + 1;
+    const previous = journey.changesets[number - 2];
+    const next = journey.changesets[number];
+    function navigate(event: MouseEvent<HTMLAnchorElement>, id: string) {
+        onNavigateChangeset(event, id);
+        if (event.defaultPrevented) headingRef.current?.scrollIntoView({ block: 'start' });
+    }
     async function submit(event: React.FormEvent) {
         event.preventDefault();
         if (!canComment || pending || !draft.trim()) return;
@@ -42,7 +52,12 @@ function ChangesetContents({ project, journey, changeset, onComment, canComment 
         }
     }
     return <article className={styles.detail}>
-        <header className={styles.heading}>
+        {journey.changesets.length > 1 && <nav className={styles.navigation} aria-label="Changeset navigation">
+            {previous ? <a href={hrefForChangeset(previous.id)} onClick={event => navigate(event, previous.id)} aria-label={`Previous changeset: ${previous.description}`} title={previous.description}><ArrowLeft size={16} aria-hidden="true"/>Back</a> : <button type="button" disabled aria-label="No previous changeset"><ArrowLeft size={16} aria-hidden="true"/>Back</button>}
+            <span aria-live="polite">Changeset {number} of {journey.changesets.length}</span>
+            {next ? <a href={hrefForChangeset(next.id)} onClick={event => navigate(event, next.id)} aria-label={`Next changeset: ${next.description}`} title={next.description}>Next<ArrowRight size={16} aria-hidden="true"/></a> : <button type="button" disabled aria-label="No next changeset">Next<ArrowRight size={16} aria-hidden="true"/></button>}
+        </nav>}
+        <header ref={headingRef} className={styles.heading}>
             <p>Changeset {number} · {journey.status === 'working' ? 'In progress' : journey.status}</p>
             <h2>{changeset.description}</h2>
             <p>{journey.title} · <code>{changeset.id.slice(0, 8)}</code></p>
