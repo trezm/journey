@@ -1,6 +1,7 @@
 import { readableRepository, discoverRepositories, privateResponseHeaders } from '@/lib/avc/repository-access';
 import { readerState, acceptedRevision, visibility } from '@/lib/avc/repository-visibility';
 import { bindings, readProject, mutate } from '@/lib/avc/storage';
+import { readReceipt } from '@/lib/avc/receipt-archive';
 import { authorize, sameOrigin, digest, token } from '@/lib/avc/auth';
 import { GitStore } from '@/lib/avc/git';
 import { type State, type Files, type Journey, type BreakingChange, ProtocolError, insist, emit, getJourney, activeJourney, acquire, recordPatch, checkTokens, validateSubmission, finalizeIntegration, mergeFiles, remap, diff, publicState, notifyWaiters, pendingIntegrations, expire, updatePolicy, approvalAuthority, validateIntegrationAuthority, approvalInbox } from '@/lib/avc/core';
@@ -114,7 +115,7 @@ export async function POST(req: Request) {
         const legacyRoles = action === 'review' && b.kind === 'approve' && user.agent ? await legacyActorRoles(id) : {};
         const requestId = field(b.requestId, 'Request ID', 100);
         const result = await mutate(id, async (s) => {
-            const receipt = s.receipts[user.id + ':' + requestId] as {
+            const receipt = await readReceipt(bindings().db, s, user.id + ':' + requestId) as {
                 request: string;
                 result: unknown;
             } | undefined;
