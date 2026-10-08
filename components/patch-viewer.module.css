@@ -94,3 +94,10 @@
 :global(.dark) .diff .hunk td { color: #c3cfdf; background: #27364b; }
 :global(.dark) .message { color: var(--muted-foreground); }
 :global(.dark) .message button { border-color: var(--border); background: var(--card); color: var(--foreground); }
+
+.lineTarget { display: block; width: 100%; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; line-height: inherit; text-align: left; white-space: inherit; overflow-wrap: inherit; cursor: pointer; user-select: text; }
+.lineTarget:hover { background: color-mix(in srgb, var(--primary) 8%, transparent); }
+.lineTarget:focus-visible, .contextControl button:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.diff .contextControl td { padding: 4px 12px; background: var(--muted); }
+.contextControl button { padding: 3px 8px; border: 1px solid var(--border); border-radius: 4px; background: var(--card); color: var(--muted-foreground); font: .75rem Inter, ui-sans-serif, system-ui, sans-serif; cursor: pointer; }
+.contextControl button:hover { background: var(--accent); color: var(--accent-foreground); }

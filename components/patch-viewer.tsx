@@ -4,7 +4,7 @@ import { Fragment, useId, useMemo, useState, useSyncExternalStore } from 'react'
 import { ChevronDown, GitCommitHorizontal } from 'lucide-react';
 import type { Files, Patch, Review } from '@/lib/avc/core';
 import { useRepositoryFiles } from '@/hooks/use-repository';
-import { patchFileStatus, patchSections, type DiffLine } from '@/lib/patch-diff';
+import { patchFileStatus, patchSections, type DiffLine, type HunkContext } from '@/lib/patch-diff';
 import { PatchReview, patchReviewKey } from '@/lib/patch-review';
 import { patchLineCommentTarget, type ChangesetCommentTarget } from '@/lib/changeset-detail';
 import type { Changeset, Journey } from '@/lib/avc/core';
@@ -58,14 +58,21 @@ function PatchFile({ change, before, after, view, viewed, onViewedChange, review
     const diffId = useId();
     const [expandedChoice, setExpandedChoice] = useState<boolean | null>(null);
     const [lineThreads, setLineThreads] = useState<Record<string, { open?: boolean; draft?: string; pending?: boolean; error?: string }>>({});
+    const [context, setContext] = useState<HunkContext[]>([]);
     const expanded = expandedChoice ?? !viewed;
+    const expandContext = (hunk: number, side: 'before' | 'after', hidden: number) => setContext(current => {
+        const next = [...current];
+        const padding = next[hunk] ?? { before: 3, after: 3 };
+        next[hunk] = { ...padding, [side]: padding[side] + Math.min(10, hidden) };
+        return next;
+    });
     const threadProps = (side: 'before' | 'after', line: number) => {
         const key = `${side}:${line}`;
         return { thread: lineThreads[key] ?? {}, setThread: (updates: { open?: boolean; draft?: string; pending?: boolean; error?: string }) => setLineThreads(current => ({ ...current, [key]: { ...current[key], ...updates } })) };
     };
     const oldText = Object.hasOwn(before, change.path) ? before[change.path] : undefined;
     const newText = Object.hasOwn(after, change.path) ? after[change.path] : undefined;
-    const sections = useMemo(() => patchSections(oldText ?? '', newText ?? '', change.hunks), [oldText, newText, change.hunks]);
+    const sections = useMemo(() => patchSections(oldText ?? '', newText ?? '', change.hunks, context), [oldText, newText, change.hunks, context]);
     const oldSyntax = useMemo(() => highlightCode(change.path, oldText ?? ''), [change.path, oldText]);
     const newSyntax = useMemo(() => highlightCode(change.path, newText ?? ''), [change.path, newText]);
     const additions = sections.reduce((total, section) => total + section.lines.filter(line => line.kind === 'added').length, 0);
@@ -73,7 +80,8 @@ function PatchFile({ change, before, after, view, viewed, onViewedChange, review
     const renderCode = (line: DiffLine, side: 'before' | 'after') => {
         const number = line[side];
         const tokens = (side === 'before' ? oldSyntax : newSyntax).lines[(number ?? 1) - 1];
-        return <code>{tokens ? <SyntaxLine tokens={tokens}/> : line.text || ' '}</code>;
+        const content = <><span className={styles.marker} aria-hidden="true">{line.kind === 'removed' ? '−' : line.kind === 'added' ? '+' : ' '}</span><code>{tokens ? <SyntaxLine tokens={tokens}/> : line.text || ' '}</code></>;
+        return canComment && number !== undefined ? <button type="button" className={styles.lineTarget} aria-label={`Add comments on ${change.path}, ${side} line ${number}`} aria-expanded={lineThreads[`${side}:${number}`]?.open ?? false} onClick={() => { if (window.getSelection?.()?.isCollapsed === false) return; threadProps(side, number).setThread({ open: !lineThreads[`${side}:${number}`]?.open }); }}>{content}</button> : content;
     };
     return <section className={`${styles.file} ${viewed ? styles.fileViewed : ''}`} aria-label={`Changes to ${change.path}`}>
         <div className={styles.fileHeading}>
@@ -87,19 +95,21 @@ function PatchFile({ change, before, after, view, viewed, onViewedChange, review
                 <caption className={styles.srOnly}>{change.path}: {view === 'split' ? 'before and after' : 'unified'} changes. Minus marks removed lines and plus marks added lines.</caption>
                 <colgroup>{view === 'split' ? <><col className={styles.numberColumn}/><col/><col className={styles.numberColumn}/><col/></> : <><col className={styles.numberColumn}/><col className={styles.numberColumn}/><col/></>}</colgroup>
                 <thead><tr>{view === 'split' ? <><th colSpan={2}>Before{oldText === undefined ? ' · File did not exist' : ''}</th><th colSpan={2}>After{newText === undefined ? ' · File deleted' : ''}</th></> : <><th scope="col">Old</th><th scope="col">New</th><th scope="col">Code</th></>}</tr></thead>
-                <tbody>{sections.map((section, index) => <Fragment key={index}>
+                <tbody>{sections.map(section => <Fragment key={section.firstHunk}>
+                    {section.hiddenBefore > 0 && <tr className={styles.contextControl}><td colSpan={view === 'split' ? 4 : 3}><button type="button" onClick={() => expandContext(section.firstHunk, 'before', section.hiddenBefore)}>↑ Expand up {Math.min(10, section.hiddenBefore)} lines</button></td></tr>}
                     <tr className={styles.hunk}><td colSpan={view === 'split' ? 4 : 3}>@@ −{section.beforeStart},{section.beforeCount} +{section.afterStart},{section.afterCount} @@</td></tr>
                     {view === 'split' ? section.rows.map((row, i) => <tr key={i}>
                         {(['before', 'after'] as const).map(side => {
                             const line = row[side], className = line ? styles[line.kind] : styles.blank;
                             const anchorSide = side;
-                            return <Fragment key={side}><td className={`${styles.number} ${className}`}>{line?.[side]}</td><td className={`${styles.code} ${className}`}>{line && <><span className={styles.marker} aria-hidden="true">{line.kind === 'removed' ? '−' : line.kind === 'added' ? '+' : ' '}</span>{renderCode(line, side)}<LineDiscussion {...threadProps(anchorSide, line[side]!)} path={change.path} side={anchorSide} line={line[side]!} context={line.text} patch={patch} reviews={reviews} canComment={canComment} onComment={onComment} journey={journey} changeset={changeset}/></>}</td></Fragment>;
+                            return <Fragment key={side}><td className={`${styles.number} ${className}`}>{line?.[side]}</td><td className={`${styles.code} ${className}`}>{line && <>{renderCode(line, side)}<LineDiscussion {...threadProps(anchorSide, line[side]!)} path={change.path} side={anchorSide} line={line[side]!} context={line.text} patch={patch} reviews={reviews} canComment={canComment} onComment={onComment} journey={journey} changeset={changeset}/></>}</td></Fragment>;
                         })}
                     </tr>) : section.lines.map((line, i) => {
                         const side = line.kind === 'removed' ? 'before' : 'after';
                         const number = line[side];
-                        return <tr key={i} className={styles[line.kind]}><td className={styles.number}>{line.before}</td><td className={styles.number}>{line.after}</td><td className={styles.code}><span className={styles.marker} aria-hidden="true">{line.kind === 'removed' ? '−' : line.kind === 'added' ? '+' : ' '}</span>{renderCode(line, side)}{number !== undefined && <><LineDiscussion {...threadProps(side, number)} path={change.path} side={side} line={number} context={line.text} patch={patch} reviews={reviews} canComment={canComment} onComment={onComment} journey={journey} changeset={changeset}/>{line.kind === 'context' && line.before !== undefined && <LineDiscussion {...threadProps('before', line.before)} path={change.path} side="before" line={line.before} context={line.text} patch={patch} reviews={reviews} canComment={canComment} onComment={onComment} journey={journey} changeset={changeset}/>}</>}</td></tr>;
+                        return <tr key={i} className={styles[line.kind]}><td className={styles.number}>{line.before}</td><td className={styles.number}>{line.after}</td><td className={styles.code}>{renderCode(line, side)}{number !== undefined && <><LineDiscussion {...threadProps(side, number)} path={change.path} side={side} line={number} context={line.text} patch={patch} reviews={reviews} canComment={canComment} onComment={onComment} journey={journey} changeset={changeset}/>{line.kind === 'context' && line.before !== undefined && <LineDiscussion {...threadProps('before', line.before)} path={change.path} side="before" line={line.before} context={line.text} patch={patch} reviews={reviews} canComment={canComment} onComment={onComment} journey={journey} changeset={changeset}/>}</>}</td></tr>;
                     })}
+                {section.hiddenAfter > 0 && <tr className={styles.contextControl}><td colSpan={view === 'split' ? 4 : 3}><button type="button" onClick={() => expandContext(section.lastHunk, 'after', section.hiddenAfter)}>↓ Expand down {Math.min(10, section.hiddenAfter)} lines</button></td></tr>}
                 </Fragment>)}</tbody>
             </table>
         </div> : <p className={styles.message}>{oldText === undefined ? 'Empty file added.' : newText === undefined ? 'Empty file deleted.' : 'No visible line changes.'}</p>}
@@ -124,7 +134,7 @@ function LineDiscussion({ path, side, line, context, patch, reviews, canComment,
         }
     }
     return <>
-        {(canComment || anchored.length > 0) && <button type="button" className={styles.lineCommentToggle} aria-expanded={open || anchored.length > 0} aria-label={`${anchored.length ? 'View' : 'Add'} comments on ${path}, ${side} line ${line}`} onClick={() => setThread({ open: !open })}>{anchored.length ? `● ${anchored.length}` : '+'}</button>}
+        {anchored.length > 0 && <button type="button" className={styles.lineCommentToggle} aria-expanded={open || anchored.length > 0} aria-label={`View comments on ${path}, ${side} line ${line}`} onClick={() => setThread({ open: !open })}>{`● ${anchored.length}`}</button>}
         {(open || anchored.length > 0) && <div className={styles.lineThread}>
             {anchored.map(review => <div className={styles.lineComment} key={review.id}><strong>{review.actor}</strong><span>{review.body}</span>{review.anchor?.context && !context.startsWith(review.anchor.context) && <small>Context differs from the patch snapshot: <code>{review.anchor.context}</code></small>}</div>)}
             {open && canComment && <form onSubmit={submit} className={styles.lineComposer}><label className={styles.srOnly} htmlFor={`comment-${patch.id}-${path}-${side}-${line}`}>Comment on {path}, {side} line {line}</label><textarea id={`comment-${patch.id}-${path}-${side}-${line}`} rows={2} maxLength={4000} value={draft} onChange={event => setThread({ draft: event.target.value })} disabled={pending} placeholder={`Comment on ${side} line ${line}…`}/>{error && <span role="alert">{error}</span>}<button type="submit" disabled={pending || !draft.trim()}>{pending ? 'Posting…' : 'Post comment'}</button></form>}

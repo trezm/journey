@@ -261,3 +261,57 @@ test('line composer submits a stable anchor and preserves drafts after false sav
         assert.match(html, /Comment was not saved|Comment targets an old revision/);
     }
 });
+
+
+test('context expansion reveals ten lines independently above and below and joins adjacent sections', () => {
+    const before = Array.from({ length: 100 }, (_, i) => `line ${i + 1}`).join('\n') + '\n';
+    const after = before.replace('line 25\n', 'changed 25\ninserted\n').replace('line 55\n', 'changed 55\n');
+    const hunks = diff(before, after);
+    const original = helpers.patchSections(before, after, hunks);
+    const up = helpers.patchSections(before, after, hunks, [{ before: 13, after: 3 }]);
+    assert.equal(original[0].beforeStart - up[0].beforeStart, 10);
+    assert.equal(up[0].beforeCount - original[0].beforeCount, 10);
+    assert.equal(up[1].beforeStart, original[1].beforeStart);
+    const down = helpers.patchSections(before, after, hunks, [{ before: 3, after: 13 }]);
+    assert.equal(down[0].beforeStart, original[0].beforeStart);
+    assert.equal(down[0].beforeCount - original[0].beforeCount, 10);
+    const joined = helpers.patchSections(before, after, hunks, [{ before: 103, after: 33 }, { before: 33, after: 103 }]);
+    assert.equal(joined.length, 1);
+    assert.equal(joined[0].hiddenBefore, 0);
+    assert.equal(joined[0].hiddenAfter, 0);
+    assert.equal(joined[0].firstHunk, 0);
+    assert.equal(joined[0].lastHunk, 1);
+    const oldNumbers = joined[0].lines.flatMap(line => line.before === undefined ? [] : [line.before]);
+    assert.deepEqual(oldNumbers, Array.from({ length: 100 }, (_, i) => i + 1));
+    assert.equal(joined[0].lines.find(line => line.text === 'line 56').after, 57);
+});
+
+test('context buttons persist expansion across diff views and file collapse; lines comment without plus controls', () => {
+    const before = Array.from({ length: 40 }, (_, i) => `line ${i + 1}`).join('\n');
+    const after = before.replace('line 20\n', 'changed\n');
+    const contextPatch = { ...patch, changes: [{ path: 'app.ts', hunks: diff(before, after) }] };
+    const viewer = renderViewer({ requested: true, canComment: true, patch: contextPatch, before: { 'app.ts': before }, after: { 'app.ts': after } });
+    const expansion = direction => viewer.controls.find(control => control.children?.[0] === `${direction === 'up' ? '↑' : '↓'} Expand ${direction} `);
+    assert.doesNotMatch(viewer.html, /lineCommentToggle/);
+    expansion('up').onClick();
+    let html = viewer.render();
+    assert.match(html, />line 7</);
+    assert.doesNotMatch(html, />line 6</);
+    expansion('down').onClick();
+    html = viewer.render();
+    assert.match(html, />line 33</);
+    assert.doesNotMatch(html, />line 34</);
+    viewer.controls.find(control => control.children === 'Unified').onClick();
+    html = viewer.render();
+    assert.match(html, />line 7</);
+    assert.match(html, />line 33</);
+    viewer.controls.find(control => control['aria-label'] === 'Collapse app.ts').onClick();
+    viewer.render();
+    viewer.controls.find(control => control['aria-label'] === 'Expand app.ts').onClick();
+    viewer.render();
+    viewer.controls.find(control => control['aria-label'] === 'Add comments on app.ts, after line 7').onClick();
+    assert.match(viewer.render(), /Comment on after line 7/);
+    expansion('up').onClick();
+    viewer.render();
+    assert.equal(expansion('up'), undefined);
+});
