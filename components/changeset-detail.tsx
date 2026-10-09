@@ -3,6 +3,7 @@
 import { useId, useRef, useState, type MouseEvent } from 'react';
 import { ArrowLeft, ArrowRight } from 'lucide-react';
 import type { Changeset, Journey } from '@/lib/avc/core';
+import { submitCommentOnShortcut } from '@/lib/comment-shortcut';
 import { changesetCommentTarget, changesetDiscussion, type ChangesetCommentTarget } from '@/lib/changeset-detail';
 import { PatchViewer } from './patch-viewer';
 import styles from './changeset-detail.module.css';
@@ -77,7 +78,7 @@ function ChangesetContents({ project, journey, changeset, onComment, canComment 
             </li>)}</ol> : <p className={styles.empty}>No comments on this changeset yet.</p>}
             <form onSubmit={submit} className={styles.composer}>
                 <label htmlFor={inputId}>Comment on this changeset</label>
-                <textarea id={inputId} value={draft} onChange={event => setDraft(event.target.value)} placeholder="Leave a comment…" rows={4} maxLength={4000} disabled={!canComment || pending}/>
+                <textarea onKeyDown={submitCommentOnShortcut} id={inputId} value={draft} onChange={event => setDraft(event.target.value)} placeholder="Leave a comment…" rows={4} maxLength={4000} disabled={!canComment || pending}/>
                 {error && <p role="alert" className={styles.error}>{error}</p>}
                 <button type="submit" disabled={!canComment || pending || !draft.trim()}>{pending ? 'Posting…' : 'Comment'}</button>
             </form>

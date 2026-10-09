@@ -9,6 +9,7 @@ import { PatchReview, patchReviewKey } from '@/lib/patch-review';
 import { patchLineCommentTarget, type ChangesetCommentTarget } from '@/lib/changeset-detail';
 import type { Changeset, Journey } from '@/lib/avc/core';
 import { highlightCode } from '@/lib/syntax-highlight';
+import { submitCommentOnShortcut } from '@/lib/comment-shortcut';
 import { SyntaxLine } from '@/components/syntax-code';
 import styles from './patch-viewer.module.css';
 
@@ -137,7 +138,7 @@ function LineDiscussion({ path, side, line, context, patch, reviews, canComment,
         {anchored.length > 0 && <button type="button" className={styles.lineCommentToggle} aria-expanded={open || anchored.length > 0} aria-label={`View comments on ${path}, ${side} line ${line}`} onClick={() => setThread({ open: !open })}>{`● ${anchored.length}`}</button>}
         {(open || anchored.length > 0) && <div className={styles.lineThread}>
             {anchored.map(review => <div className={styles.lineComment} key={review.id}><strong>{review.actor}</strong><span>{review.body}</span>{review.anchor?.context && !context.startsWith(review.anchor.context) && <small>Context differs from the patch snapshot: <code>{review.anchor.context}</code></small>}</div>)}
-            {open && canComment && <form onSubmit={submit} className={styles.lineComposer}><label className={styles.srOnly} htmlFor={`comment-${patch.id}-${path}-${side}-${line}`}>Comment on {path}, {side} line {line}</label><textarea id={`comment-${patch.id}-${path}-${side}-${line}`} rows={2} maxLength={4000} value={draft} onChange={event => setThread({ draft: event.target.value })} disabled={pending} placeholder={`Comment on ${side} line ${line}…`}/>{error && <span role="alert">{error}</span>}<button type="submit" disabled={pending || !draft.trim()}>{pending ? 'Posting…' : 'Post comment'}</button></form>}
+            {open && canComment && <form onSubmit={submit} className={styles.lineComposer}><label className={styles.srOnly} htmlFor={`comment-${patch.id}-${path}-${side}-${line}`}>Comment on {path}, {side} line {line}</label><textarea onKeyDown={submitCommentOnShortcut} id={`comment-${patch.id}-${path}-${side}-${line}`} rows={2} maxLength={4000} value={draft} onChange={event => setThread({ draft: event.target.value })} disabled={pending} placeholder={`Comment on ${side} line ${line}…`}/>{error && <span role="alert">{error}</span>}<button type="submit" disabled={pending || !draft.trim()}>{pending ? 'Posting…' : 'Post comment'}</button></form>}
         </div>}
     </>;
 }

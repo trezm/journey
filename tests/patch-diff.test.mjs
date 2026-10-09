@@ -109,6 +109,7 @@ function renderViewer(options = {}) {
         } };
         if (name === '@/lib/patch-diff') return helpers;
         if (name === '@/lib/patch-review') return reviewHelpers;
+        if (name === '@/lib/comment-shortcut') return require('../lib/comment-shortcut.ts');
         if (name === '@/lib/changeset-detail') return { patchLineCommentTarget: (journey, changeset, patch, anchor, body) => ({ journey: journey.id, changeset: changeset.id, revision: journey.head, patch: patch.id, anchor, body }) };
         if (name === '@/lib/syntax-highlight') return { highlightCode: (path, source) => { highlightCalls.push({ path, source }); return { language: 'typescript', lines: source.split('\n').map(value => [{ value, classes: [] }]) }; } };
         if (name === '@/components/syntax-code') return { SyntaxLine: ({ tokens }) => React.createElement('span', {}, tokens.map(token => token.value).join('')) };
