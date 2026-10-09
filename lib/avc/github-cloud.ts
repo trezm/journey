@@ -1,6 +1,6 @@
+import { importCloudBatch, type ImportItem } from './cloud-import.ts';
 import { syncView } from './sync-view.ts';
-import { deflateSync } from 'node:zlib';
-import { GitStore, makeCommit, object, parseTree, references } from './git.ts';
+import { GitStore, makeCommit, parseTree, references } from './git.ts';
 import { providerTransport, remoteProvider } from './provider-transport.ts';
 import { connectionToken, encrypt } from './oauth.ts';
 import { emit, insist, notifyWaiters, ProtocolError, type State } from './core.ts';
@@ -9,8 +9,8 @@ import { syncCommitMeta } from './sync-git.ts';
 import { beginSync, conflictSync, currentSyncRun, observeSync, stageSync } from './sync.ts';
 
 type ObjectType = 'commit' | 'tree' | 'blob';
-type Item = { hash: string; type: ObjectType; expanded?: boolean; depth?: number; path?: string };
-export type CloudWork = { phase: 'import' | 'remote-ancestry' | 'journey-ancestry' | 'export' | 'publish'; remote: string | null; original: string; todo: Item[]; seen: string[]; transferHead?: string; candidate?: string; preserve?: boolean; initialized?: boolean };
+type Item = ImportItem;
+export type CloudWork = { phase: 'import' | 'remote-ancestry' | 'journey-ancestry' | 'export' | 'publish'; remote: string | null; original: string; todo: Item[]; seen: string[]; transferHead?: string; candidate?: string; preserve?: boolean; initialized?: boolean; importVersion?: 1 };
 const actor = { id: 'cloud-github-sync', agent: false };
 const MAX_OBJECTS = 50_000;
 const BATCH = 20;
@@ -175,20 +175,23 @@ export async function runCloudSync(project: string, key: string) {
                 await mutate(project, state => { const current = fence(state, token, ownedGeneration).work!; current.transferHead = head; current.initialized = true; });
                 continue;
             }
+            if (work.phase === 'import' && (work.todo.length || work.importVersion !== 1)) {
+                const before = JSON.stringify(work);
+                await importCloudBatch(project, bindings().bucket, work, new Set([work.original, state.sync!.lastSyncedHead].filter((head): head is string => !!head)),
+                    (hash, type) => remote.read(hash, type), () => execution.throwIfAborted(), Math.min(deadline, Date.now() + 5_000));
+                execution.throwIfAborted();
+                await mutate(project, state => {
+                    const current = fence(state, token, ownedGeneration);
+                    insist(JSON.stringify(current.work) === before, 'sync_progress_changed', 'Cloud work changed.', 409);
+                    current.work = work;
+                });
+                continue;
+            }
             const item = work.todo.at(-1);
             if (item) {
                 let next: Item[] = [], completed = true, transferHead: string | undefined;
                 if (!work.seen.includes(seenKey(work, item))) {
-                    if (work.phase === 'import') {
-                        // Only verified complete Journey heads are closure cutpoints.
-                        if (item.hash !== work.original && item.hash !== state.sync!.lastSyncedHead) {
-                            const stored = await bindings().bucket.head(git.key(item.hash));
-                            const body = stored ? (await git.read(item.hash)).body : await remote.read(item.hash, item.type);
-                            insist((await object(item.type, body)).oid === item.hash, 'invalid_object', 'Stored Git object hash/type mismatch.', 400);
-                            if (!stored) await bindings().bucket.put(git.key(item.hash), deflateSync((await object(item.type, body)).raw));
-                            next = children(item.type, body, item);
-                        }
-                    } else if (work.phase === 'remote-ancestry' || work.phase === 'journey-ancestry') {
+                    if (work.phase === 'remote-ancestry' || work.phase === 'journey-ancestry') {
                         const target = work.phase === 'remote-ancestry' ? work.original : work.remote;
                         if (item.hash === target) {
                             await mutate(project, state => {

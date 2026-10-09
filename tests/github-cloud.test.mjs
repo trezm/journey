@@ -249,14 +249,15 @@ test('hosted fast-forward import completes without a file/tree snapshot or token
     s.journeys.push({ id: 'historical-journey', status: 'integrated', reviews: [{ kind: 'approve', revision: initial.oid, resolved: false }], changesets: [] });
     let row = { id: 'repo', owner: 'owner', name: 'Repo', version: 0, state: encodeState(s) };
     const sessions = new Map();
-    const db = { projectIds: ['repo'], prepare(sql) { return { bind(...args) { return {
+    const db = { reads: 0, writes: 0, projectIds: ['repo'], prepare(sql) { return { bind(...args) { return {
         async first() {
+            db.reads++;
             if (sql.startsWith('SELECT sessions.user,users.email')) return sessions.get(args[0]) ?? null;
             if (sql.startsWith('SELECT owner FROM projects')) return { owner: 'owner' };
             return structuredClone(row);
         },
         async all() { return { results: db.projectIds.filter(id => id > args[0]).slice(0, 100).map(id => ({ id })) }; },
-        async run() { assert(sql.startsWith('UPDATE projects SET state=')); if (args[2] !== row.version) return { meta: { changes: 0 } }; row = { ...row, state: args[0], version: row.version + 1 }; return { meta: { changes: 1 } }; },
+        async run() { db.writes++; assert(sql.startsWith('UPDATE projects SET state=')); if (args[2] !== row.version) return { meta: { changes: 0 } }; row = { ...row, state: args[0], version: row.version + 1 }; return { meta: { changes: 1 } }; },
     }; } }; } };
     globalThis.__cloudTestEnv = { DB: db, BUCKET: bucket };
     const hooks = registerHooks({ resolve(specifier, context, next) {
@@ -318,6 +319,18 @@ test('hosted fast-forward import completes without a file/tree snapshot or token
     assert(!bucket.reads.some(key => key.includes('/snapshots/') || key.includes('/trees/')));
     assert(!JSON.stringify(publicSync(final)).includes(credential)); assert(!JSON.stringify(final).includes(token));
     const stored = await git.read(incoming.oid); assert.equal((await object('commit', stored.body)).oid, incoming.oid);
+    await t.test('450 new blobs use bounded D1 checkpoints rather than per-object state writes', async () => {
+        const saved = structuredClone(row), beforeReads = db.reads, beforeWrites = db.writes;
+        const wide = await remoteGit.save(Object.fromEntries(Array.from({ length: 450 }, (_, i) => [`wide/file-${i}`, `new-${i}`])), incoming.oid, 'wide import', 'GitHub');
+        refs.set('main', wide.oid);
+        const ready = decodeState(row.state); delete ready.sync.cloud.nextAttemptAt; row.state = encodeState(ready);
+        await runCloudSync('repo', key);
+        const result = decodeState(row.state);
+        assert.equal(result.head, wide.oid); assert.equal(result.sync.status, 'idle');
+        assert(db.writes - beforeWrites <= 15, `D1 writes: ${db.writes - beforeWrites}`);
+        assert(db.reads - beforeReads <= 35, `D1 reads: ${db.reads - beforeReads}`);
+        row = saved; refs.set('main', incoming.oid);
+    });
     // Journey changes are uploaded by object; a successful GitHub update whose
     // acknowledgement is lost resumes from persisted publish state exactly once.
     const outgoing = await git.save({ file: 'outgoing', added: 'new blob' }, incoming.oid, 'Journey change', 'Worker');
@@ -354,7 +367,7 @@ test('hosted fast-forward import completes without a file/tree snapshot or token
         const response = await api.POST(new Request('https://journey.test/api/sync', { method: 'POST', headers: { Cookie: `avc_session=${cookie}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ project: 'repo', action, ...extra }) }));
         return { status: response.status, body: await response.json() };
     };
-    const diverseFiles = Object.fromEntries(Array.from({ length: 55 }, (_, i) => ['file-' + i, 'unique remote content ' + i]));
+    const diverseFiles = Object.fromEntries(Array.from({ length: 2055 }, (_, i) => ['file-' + i, 'unique remote content ' + i]));
     const remoteSibling = await remoteGit.save(diverseFiles, outgoing.oid, 'divergent remote', 'GitHub'); refs.set('main', remoteSibling.oid);
     const localSibling = await git.save({ file: 'local sibling' }, outgoing.oid, 'divergent Journey', 'Worker');
     const diverged = decodeState(row.state); diverged.head = localSibling.oid; diverged.revisions[localSibling.oid] = localSibling.meta;
@@ -371,7 +384,7 @@ test('hosted fast-forward import completes without a file/tree snapshot or token
         assert(queued.length > 0); assert.equal(queued[0].options.delaySeconds, 5);
         for (let turns = 0; turns < 30 && decodeState(row.state).sync.status !== 'conflict'; turns++) await deliver();
         const conflict = decodeState(row.state);
-        assert(acknowledged > 2); assert.equal(conflict.sync.status, 'conflict'); assert.equal(conflict.head, localSibling.oid);
+        assert(acknowledged > 1); assert.equal(conflict.sync.status, 'conflict'); assert.equal(conflict.head, localSibling.oid);
         assert.equal(refs.get('main'), remoteSibling.oid); assert.equal(refs.get(conflict.sync.run.conflictBranch), localSibling.oid);
         assert.equal(conflict.sync.run.conflictPublished, true);
     });
