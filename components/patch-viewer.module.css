@@ -18,7 +18,7 @@
 .viewToggle button[aria-pressed=true] { background: #e2ebf6; color: #183d68; font-weight: 600; }
 .viewToggle button:focus-visible, .summary:focus-visible, .scroll:focus-visible, .fileToggle:focus-visible, .viewedLabel input:focus-visible { outline: 2px solid #3269a8; outline-offset: -2px; }
 .file { border-top: 1px solid #e2e7ef; min-width: 0; }
-.fileHeading { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; padding: 11px 14px; font-size: .75rem; background: #fafbfc; }
+.fileHeading { position: sticky; top: var(--patch-review-sticky-top, 12px); z-index: 4; display: flex; align-items: center; flex-wrap: wrap; gap: 9px; padding: 11px 14px; font-size: .75rem; background: #fafbfc; box-shadow: 0 1px 0 var(--border); }
 .fileToggle { display: flex; align-items: center; gap: 9px; flex: 1; min-width: 120px; padding: 3px 0; border: 0; background: transparent; color: #344054; text-align: left; cursor: pointer; }
 .fileToggle strong { font-family: monospace; font-size: .75rem; font-weight: 600; overflow-wrap: anywhere; min-width: 0; }
 .fileToggle svg { flex-shrink: 0; color: #758298; }

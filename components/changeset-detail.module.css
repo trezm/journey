@@ -38,6 +38,7 @@
 .reviewMeta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 0 16px 14px; color: #64748b; font-size: .75rem; }
 .reviewMeta span { border: 1px solid #dce3ed; padding: 2px 6px; border-radius: 4px; }
 
+.detail:has(> .navigation) { --patch-review-sticky-top: 82px; }
 .navigation { position: sticky; top: 12px; z-index: 5; justify-self: center; display: flex; align-items: center; gap: 14px; max-width: 100%; padding: 6px; border: 1px solid #dce3ed; border-radius: 10px; background: #fff; box-shadow: 0 4px 16px #18223418; }
 .navigation a, .navigation button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 8px 12px; border: 0; border-radius: 6px; background: transparent; color: #334155; font-size: .85rem; font-weight: 600; text-decoration: none; white-space: nowrap; }
 .navigation a:hover { background: #edf2f7; }
