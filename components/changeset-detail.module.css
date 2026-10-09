@@ -11,9 +11,9 @@
 .comments { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; }
 .comments li { border: 1px solid #dce3ed; border-radius: 7px; overflow: hidden; }
 .comments header { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 16px; background: #f6f8fa; color: #64748b; font-size: .8rem; overflow-wrap: anywhere; }
-.comments strong { color: #334155; }
+.comments strong { color: var(--muted-foreground); font-weight: 400; }
 .comments time { margin-left: auto; }
-.comments p { margin: 0; padding: 16px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.comments p, :global(.dark) .comments p { margin: 0; padding: 16px; color: var(--foreground); white-space: pre-wrap; overflow-wrap: anywhere; }
 .comments a { display: inline-block; margin: 12px 16px 0; font-size: .8rem; color: #2563eb; }
 .composer { display: grid; gap: 10px; }
 .composer label { font-size: .85rem; font-weight: 600; }
@@ -29,7 +29,7 @@
 :global(.dark) .empty,:global(.dark) .comments header { background: #202d40; }
 :global(.dark) .comments li { border-color: #344258; }
 :global(.dark) .comments header { color: var(--muted-foreground); }
-:global(.dark) .comments strong { color: #e6edf7; }
+:global(.dark) .comments strong { color: var(--muted-foreground); }
 :global(.dark) .comments a { color: #8ab4ff; }
 :global(.dark) .composer textarea { background: #182335; border-color: #3a4960; color: #e6edf7; }
 :global(.dark) .composer button { background: #238636; color: #fff; }

@@ -53,7 +53,7 @@
 .lineCommentToggle:hover, .lineCommentToggle:focus-visible { border-color: var(--border); background: var(--muted); }
 .lineThread { display: grid; gap: 6px; margin: 4px 0 6px; color: var(--foreground); font-family: Inter, ui-sans-serif, system-ui, sans-serif; white-space: normal; }
 .lineComment { display: grid; gap: 3px; padding: 7px 9px; border-left: 2px solid var(--primary); background: var(--muted); color: var(--foreground); font-size: .75rem; white-space: pre-wrap; overflow-wrap: anywhere; }
-.lineComment strong { color: var(--foreground); font-size: .7rem; }
+.lineComment strong, :global(.dark) .lineComment strong { color: var(--muted-foreground); font-size: .7rem; font-weight: 400; }
 .lineComment small { color: var(--muted-foreground); }
 .lineComment code { font-size: .7rem; }
 .lineComposer { display: grid; gap: 5px; padding: 7px; border: 1px solid var(--border); border-radius: 5px; background: var(--card); }
