@@ -74,11 +74,12 @@ test('composer target captures explicit journey, changeset and current revision 
 });
 
 // Run the actual route with an in-memory storage boundary, retaining production
-// target validation, state lookup, sync checks, and event emission.
+// target validation, receipt lookup, state lookup, sync checks, and event emission.
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import * as core from '../lib/avc/core.ts';
 import { assertSyncWritable } from '../lib/avc/sync.ts';
+import { readReceipt } from '../lib/avc/receipt-archive.ts';
 const require = createRequire(import.meta.url);
 const ts = require('typescript');
 const compiledRoute = ts.transpileModule(readFileSync(new URL('../app/api/avc/route.ts', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
@@ -93,6 +94,12 @@ function routeFixture(status = 'working', denied = false) {
         '@/lib/avc/core': core,
         '@/lib/avc/review-target': { validateReviewTarget },
         '@/lib/avc/sync': { assertSyncWritable },
+        '@/lib/avc/receipt-archive': { readReceipt },
+        // These route dependencies are unused by the review action.
+        '@/lib/avc/repository-access': {},
+        '@/lib/avc/repository-visibility': {},
+        '@/lib/avc/integration': {},
+        '@/lib/avc/live': {},
         '@/lib/avc/storage': { bindings: () => ({ bucket: {} }), mutate: async (_id, fn) => fn(state) },
         '@/lib/avc/auth': {
             sameOrigin: () => {}, digest: async text => text,
@@ -101,7 +108,10 @@ function routeFixture(status = 'working', denied = false) {
         '@/lib/avc/git': { GitStore: class { files = async revision => revision === 'before' ? { 'file.ts': 'old line' } : { 'file.ts': 'new line' }; } },
     };
     const exports = {};
-    new Function('require', 'exports', compiledRoute)(id => modules[id] ?? {}, exports);
+    new Function('require', 'exports', compiledRoute)(id => {
+        assert.ok(Object.hasOwn(modules, id), `Review route fixture is missing dependency: ${id}`);
+        return modules[id];
+    }, exports);
     return { state, j, authCalls: () => authCalls, post: extra => exports.POST(new Request('http://localhost/api/avc', { method: 'POST', body: JSON.stringify({ action: 'review', project: 'repo', requestId: crypto.randomUUID(), journey: j.id, body: 'Scoped comment', ...target(), ...extra }) })) };
 }
 
@@ -134,4 +144,24 @@ test('actual review endpoint accepts scoped comments in all states and preserves
     for (const kind of ['approve', 'request_changes']) assert.equal((await f2.post({ kind })).status, 409);
     assert.equal((await f2.post({ patch: 'other-patch' })).status, 400);
     assert.equal(f2.j.reviews.length, 0);
+});
+
+test('actual review endpoint replays comment retries without duplicating reviews or events', async () => {
+    const f = routeFixture();
+    const requestId = crypto.randomUUID();
+    const first = await f.post({ requestId });
+    assert.equal(first.status, 200, await first.clone().text());
+    const result = await first.json();
+    const retry = await f.post({ requestId });
+    assert.equal(retry.status, 200, await retry.clone().text());
+    assert.deepEqual(await retry.json(), result);
+    assert.equal(f.authCalls(), 2);
+    assert.equal(f.j.reviews.length, 1);
+    assert.equal(f.state.events.length, 1);
+
+    const conflict = await f.post({ requestId, body: 'Different comment' });
+    assert.equal(conflict.status, 409);
+    assert.equal((await conflict.json()).code, 'idempotency_conflict');
+    assert.equal(f.j.reviews.length, 1);
+    assert.equal(f.state.events.length, 1);
 });
