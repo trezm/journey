@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic';
 import { submitForReview, reconciliationPlan, recordReconciliation, leaseActive, normalizePostedLocks } from '@/lib/avc/core';
 import { integrationFiles } from '@/lib/avc/integration';
 import { assertSyncWritable } from '@/lib/avc/sync';
-import { validateReviewTarget } from '@/lib/avc/review-target';
+import { validateReviewTarget, reviewReplyTarget } from '@/lib/avc/review-target';
 import { liveSnapshot } from '@/lib/avc/live';
 const sample: Files = { 'src/users.rs': 'pub struct User {\n    pub id: u64,\n    pub name: String,\n}\n\npub fn find_user(id: u64) -> Option<User> {\n    if id == 1 {\n        Some(User { id, name: "Ada".into() })\n    } else {\n        None\n    }\n}\n\npub fn display_name(user: &User) -> String {\n    user.name.clone()\n}\n', 'Cargo.toml': '[package]\nname = "journey-demo"\nversion = "0.1.0"\nedition = "2021"\n\n[lib]\npath = "src/users.rs"\n', 'README.md': '# Journey demo\n\nA small Rust library for trying concurrent range locks and recorded changesets.\n\nRun cargo test locally. CI is optional.\n' };
 const field = (v: unknown, name: string, max = 4000) => { insist(typeof v === 'string' && v.trim().length > 0 && v.length <= max, 'invalid_input', `${name} is required (maximum ${max} characters).`, 400); return v.trim(); };
@@ -226,15 +226,16 @@ export async function POST(req: Request) {
                         break;
                     }
                     case 'review': {
+                        Object.assign(b, reviewReplyTarget(j, b));
                         validateReviewTarget(j, b);
                         const patch = b.anchor && j.changesets.flatMap(changeset => changeset.patches).find(item => item.id === b.patch);
                         const anchor = patch ? validateReviewTarget(j, b, { before: await git.files(patch.before), after: await git.files(patch.after) }) : undefined;
                         const authority = b.kind === 'approve' ? approvalAuthority(s, j, user, legacyRoles) : undefined;
                         if (b.kind === 'approve')
                             validateSubmission(s, j);
-                        const r = { id: crypto.randomUUID(), actor: user.id, body: field(b.body ?? (b.kind === 'approve' ? 'Approved' : 'Review'), 'Review text'), kind: b.kind, revision: j.head, at: Date.now(), ...(authority ? { authority } : {}), ...(b.changeset ? { changeset: b.changeset } : {}), ...(b.patch ? { patch: b.patch } : {}), ...(anchor ? { anchor } : {}) };
+                        const r = { id: crypto.randomUUID(), actor: user.id, body: field(b.body ?? (b.kind === 'approve' ? 'Approved' : 'Review'), 'Review text'), kind: b.kind, revision: j.head, at: Date.now(), ...(authority ? { authority } : {}), ...(b.changeset ? { changeset: b.changeset } : {}), ...(b.patch ? { patch: b.patch } : {}), ...(anchor ? { anchor } : {}), ...(b.replyTo ? { replyTo: b.replyTo } : {}) };
                         j.reviews.push(r);
-                        emit(s, b.kind === 'approve' ? 'review.approved' : b.kind === 'request_changes' ? 'review.changes_requested' : 'review.commented', user.id, { review: r.id, body: r.body, revision: j.head, ...(authority ? { authority } : {}) }, j.id, [j.id]);
+                        emit(s, b.kind === 'approve' ? 'review.approved' : b.kind === 'request_changes' ? 'review.changes_requested' : 'review.commented', user.id, { review: r.id, body: r.body, revision: j.head, ...(b.replyTo ? { replyTo: b.replyTo } : {}), ...(authority ? { authority } : {}) }, j.id, [j.id]);
                         result = { review: r.id };
                         break;
                     }

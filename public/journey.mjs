@@ -100,6 +100,8 @@ Never assume a notification grants a lock.
 Watcher stops when the journey integrates or is abandoned. node .journey/journey.mjs watch --background restarts it.
 From a coordinator checkout without an active journey, the watcher polls the approval queue every 5 seconds and uses a separate coordinator cursor.
 node .journey/journey.mjs abandon closes this journey and returns locks.
+To answer an existing comment, use action review, kind comment, replyTo set to its review ID, and revision set to the current journey head. Write the direct answer without a Re: quotation; Journey displays the parent context. The server inherits the parent changeset, patch and line anchor. Replies do not resolve change requests; use resolve_review separately when appropriate.
+Example request.json: {"action":"review","journey":"JOURNEY_ID","kind":"comment","replyTo":"REVIEW_ID","revision":"CURRENT_HEAD","body":"Done: added the account table and verification links."}
 For other API actions: node .journey/journey.mjs request request.json. The CLI supplies project and a retry-stable requestId.
 Imported committed local branches and tags are retained (a differing source main is also retained as imported/main); uncommitted edits are not uploaded by import.
 `;

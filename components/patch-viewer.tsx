@@ -1,5 +1,7 @@
 'use client';
 
+import { ReviewThreads } from './review-threads';
+
 import { Fragment, useId, useMemo, useState, useSyncExternalStore } from 'react';
 import { ChevronDown, GitCommitHorizontal } from 'lucide-react';
 import type { Files, Patch, Review } from '@/lib/avc/core';
@@ -137,7 +139,7 @@ function LineDiscussion({ path, side, line, context, patch, reviews, canComment,
     return <>
         {anchored.length > 0 && <button type="button" className={styles.lineCommentToggle} aria-expanded={open || anchored.length > 0} aria-label={`View comments on ${path}, ${side} line ${line}`} onClick={() => setThread({ open: !open })}>{`● ${anchored.length}`}</button>}
         {(open || anchored.length > 0) && <div className={styles.lineThread}>
-            {anchored.map(review => <div className={styles.lineComment} key={review.id}><strong>{review.actor}</strong><span>{review.body}</span>{review.anchor?.context && !context.startsWith(review.anchor.context) && <small>Context differs from the patch snapshot: <code>{review.anchor.context}</code></small>}</div>)}
+            <ReviewThreads reviews={anchored} journey={journey ?? { id: '', head: patch.after }} canComment={canComment && !!journey} onComment={onComment} context={review => review.anchor?.context && !context.startsWith(review.anchor.context) ? <small>Context differs from the patch snapshot: <code>{review.anchor.context}</code></small> : null}/>
             {open && canComment && <form onSubmit={submit} className={styles.lineComposer}><label className={styles.srOnly} htmlFor={`comment-${patch.id}-${path}-${side}-${line}`}>Comment on {path}, {side} line {line}</label><textarea onKeyDown={submitCommentOnShortcut} id={`comment-${patch.id}-${path}-${side}-${line}`} rows={2} maxLength={4000} value={draft} onChange={event => setThread({ draft: event.target.value })} disabled={pending} placeholder={`Comment on ${side} line ${line}…`}/>{error && <span role="alert">{error}</span>}<button type="submit" disabled={pending || !draft.trim()}>{pending ? 'Posting…' : 'Post comment'}</button></form>}
         </div>}
     </>;

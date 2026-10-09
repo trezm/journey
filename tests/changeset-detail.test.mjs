@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { validateReviewTarget } from '../lib/avc/review-target.ts';
+import { validateReviewTarget, reviewReplyTarget } from '../lib/avc/review-target.ts';
 import { changesetCommentTarget, changesetDiscussion, patchLineCommentTarget } from '../lib/changeset-detail.ts';
 
 const changeset = { id: 'one', patches: [{ id: 'patch-one', changes: [{ path: 'file.ts', hunks: [] }] }, { id: 'patch-two', changes: [{ path: 'file.ts', hunks: [] }] }] };
@@ -92,7 +92,7 @@ function routeFixture(status = 'working', denied = false) {
     let authCalls = 0;
     const modules = {
         '@/lib/avc/core': core,
-        '@/lib/avc/review-target': { validateReviewTarget },
+        '@/lib/avc/review-target': { validateReviewTarget, reviewReplyTarget },
         '@/lib/avc/sync': { assertSyncWritable },
         '@/lib/avc/receipt-archive': { readReceipt },
         // These route dependencies are unused by the review action.
@@ -164,4 +164,27 @@ test('actual review endpoint replays comment retries without duplicating reviews
     assert.equal((await conflict.json()).code, 'idempotency_conflict');
     assert.equal(f.j.reviews.length, 1);
     assert.equal(f.state.events.length, 1);
+});
+
+
+test('actual endpoint persists replies, inherits immutable anchors and includes parent in inbox events', async () => {
+    const f = routeFixture();
+    await f.post({ patch: 'patch-one', anchor: { path: 'file.ts', side: 'after', line: 1, context: 'line' } });
+    const parent = f.j.reviews[0];
+    parent.revision = 'older';
+    const requestId = crypto.randomUUID();
+    const reply = { replyTo: parent.id, changeset: undefined, body: 'Fixed with a clearer table.', requestId };
+    assert.equal((await f.post(reply)).status, 200);
+    assert.equal((await f.post(reply)).status, 200);
+    assert.equal(f.j.reviews.length, 2);
+    assert.equal(f.j.reviews[1].replyTo, parent.id);
+    assert.equal(f.j.reviews[1].revision, 'current');
+    assert.equal(f.j.reviews[1].changeset, 'one');
+    assert.equal(f.j.reviews[1].patch, 'patch-one');
+    assert.deepEqual(f.j.reviews[1].anchor, parent.anchor);
+    assert.equal(f.state.events.at(-1).data.replyTo, parent.id);
+    assert.equal((await f.post({ replyTo: parent.id, patch: 'patch-two' })).status, 400);
+    assert.equal((await f.post({ replyTo: 'another-journey-comment' })).status, 404);
+    assert.equal((await f.post({ replyTo: parent.id, revision: 'older' })).status, 409);
+    assert.equal(f.j.reviews.length, 2);
 });

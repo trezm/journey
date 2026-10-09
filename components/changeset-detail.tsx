@@ -5,6 +5,7 @@ import { ArrowLeft, ArrowRight } from 'lucide-react';
 import type { Changeset, Journey } from '@/lib/avc/core';
 import { submitCommentOnShortcut } from '@/lib/comment-shortcut';
 import { changesetCommentTarget, changesetDiscussion, type ChangesetCommentTarget } from '@/lib/changeset-detail';
+import { ReviewThreads } from './review-threads';
 import { PatchViewer } from './patch-viewer';
 import styles from './changeset-detail.module.css';
 
@@ -70,12 +71,7 @@ function ChangesetContents({ project, journey, changeset, onComment, canComment 
         </section>
         <section aria-label="Changeset discussion" className={styles.discussion}>
             <h3>Discussion <span>{reviews.length}</span></h3>
-            {reviews.length ? <ol className={styles.comments}>{reviews.map(review => <li key={review.id}>
-                <header><strong>{review.actor}</strong><span>{review.kind === 'approve' ? 'approved' : review.kind === 'request_changes' ? 'requested changes' : 'commented'}</span><time dateTime={new Date(review.at).toISOString()}>{new Date(review.at).toLocaleString()}</time></header>
-                {review.patch && <a href={`#patch-${review.patch}`}>Patch {changeset.patches.findIndex(patch => patch.id === review.patch) + 1}</a>}
-                <p>{review.body}</p>
-                <footer className={styles.reviewMeta}>Revision <code>{review.revision.slice(0, 7)}</code>{review.revision !== journey.head && <span>Previous revision</span>}{review.resolved && <span>Resolved</span>}</footer>
-            </li>)}</ol> : <p className={styles.empty}>No comments on this changeset yet.</p>}
+            {reviews.length ? <ReviewThreads reviews={reviews} journey={journey} canComment={canComment} onComment={onComment} context={review => review.patch && <a href={`#patch-${review.patch}`}>Patch {changeset.patches.findIndex(patch => patch.id === review.patch) + 1}{review.anchor && ` · ${review.anchor.path}:${review.anchor.line}`}</a>}/> : <p className={styles.empty}>No comments on this changeset yet.</p>}
             <form onSubmit={submit} className={styles.composer}>
                 <label htmlFor={inputId}>Comment on this changeset</label>
                 <textarea onKeyDown={submitCommentOnShortcut} id={inputId} value={draft} onChange={event => setDraft(event.target.value)} placeholder="Leave a comment…" rows={4} maxLength={4000} disabled={!canComment || pending}/>

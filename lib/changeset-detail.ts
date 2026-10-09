@@ -1,7 +1,7 @@
 import type { Changeset, Journey, Patch, Review } from './avc/core.ts';
 
 export type CommentLineAnchor = { path: string; side: 'before' | 'after'; line: number; context: string };
-export type ChangesetCommentTarget = { journey: string; changeset: string; revision: string; body: string; patch?: string; anchor?: CommentLineAnchor };
+export type ChangesetCommentTarget = { journey: string; changeset?: string; replyTo?: string; revision: string; body: string; patch?: string; anchor?: CommentLineAnchor };
 
 export function changesetDiscussion(reviews: Review[], changeset: Changeset) {
     const patches = new Set(changeset.patches.map(patch => patch.id));

@@ -107,6 +107,7 @@ function renderViewer(options = {}) {
             calls.push({ project, revision });
             return { status: options.status ?? 'ready', error: options.error ?? '', files: revision === patch.before ? options.before ?? { 'app.ts': beforeText } : options.after ?? { 'app.ts': afterText }, reload: () => {} };
         } };
+        if (name === './review-threads') return { ReviewThreads: ({ reviews }) => React.createElement('div', {}, reviews.map(review => React.createElement('p', { key: review.id }, review.body))) };
         if (name === '@/lib/patch-diff') return helpers;
         if (name === '@/lib/patch-review') return reviewHelpers;
         if (name === '@/lib/comment-shortcut') return require('../lib/comment-shortcut.ts');

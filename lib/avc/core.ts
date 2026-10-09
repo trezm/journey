@@ -55,6 +55,7 @@ export type Review = {
     id: string;
     actor: string;
     body: string;
+    replyTo?: string;
     kind: 'comment' | 'request_changes' | 'approve';
     revision: string;
     changeset?: string;

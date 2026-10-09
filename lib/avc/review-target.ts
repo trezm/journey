@@ -36,3 +36,18 @@ export function validateReviewTarget(journey: Pick<Journey, 'status' | 'head' | 
     }
     return undefined;
 }
+
+/** Resolve a reply inside this journey and inherit its immutable discussion target. */
+export function reviewReplyTarget(journey: Pick<Journey, 'reviews'>, input: { kind: unknown; replyTo?: unknown; changeset?: unknown; patch?: unknown; anchor?: unknown }) {
+    if (input.replyTo === undefined) return {};
+    insist(input.kind === 'comment', 'invalid_reply', 'Only comments can be replies.', 400);
+    const parent = journey.reviews.find(review => review.id === input.replyTo);
+    insist(parent, 'review_not_found', 'The replied-to comment is not in this journey.', 404);
+    for (const key of ['changeset', 'patch'] as const)
+        insist(input[key] === undefined || input[key] === parent[key], 'invalid_reply_target', 'A reply must keep its parent discussion target.', 400);
+    if (input.anchor !== undefined) {
+        const anchor = input.anchor as Record<string, unknown> | null;
+        insist(anchor && parent.anchor && ['path', 'side', 'line', 'context'].every(key => anchor[key] === parent.anchor![key as keyof typeof parent.anchor]), 'invalid_reply_target', 'A reply must keep its parent line anchor.', 400);
+    }
+    return { replyTo: parent.id, changeset: parent.changeset, patch: parent.patch, anchor: parent.anchor };
+}
