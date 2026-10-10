@@ -1,3 +1,5 @@
+import { env } from 'cloudflare:workers';
+import { wakeIntegratedSync, enqueueIntegratedSync } from '@/lib/avc/cloud-wakeup';
 import { readableRepository, discoverRepositories, privateResponseHeaders } from '@/lib/avc/repository-access';
 import { readerState, acceptedRevision, visibility } from '@/lib/avc/repository-visibility';
 import { bindings, readProject, mutate } from '@/lib/avc/storage';
@@ -114,6 +116,7 @@ export async function POST(req: Request) {
         }
         const legacyRoles = action === 'review' && b.kind === 'approve' && user.agent ? await legacyActorRoles(id) : {};
         const requestId = field(b.requestId, 'Request ID', 100);
+        let syncPending = false;
         const result = await mutate(id, async (s) => {
             const receipt = await readReceipt(bindings().db, s, user.id + ':' + requestId) as {
                 request: string;
@@ -297,12 +300,14 @@ export async function POST(req: Request) {
                     const c = await git.save(merged, s.head, j.title, user.name);
                     s.revisions[c.oid] = c.meta;
                     const e = finalizeIntegration(s, j, c.oid, user.id, canonical, merged);
+                    syncPending = wakeIntegratedSync(s);
                     result = { revision: c.oid, event: e.id };
                 }
             }
             s.receipts[user.id + ':' + requestId] = { request: fingerprint, result };
             return result;
         });
+        if (syncPending) await enqueueIntegratedSync(id, env.GITHUB_SYNC_QUEUE);
         return responseJson({ result });
     }
     catch (e) {

@@ -331,6 +331,39 @@ test('hosted fast-forward import completes without a file/tree snapshot or token
         assert(db.reads - beforeReads <= 35, `D1 reads: ${db.reads - beforeReads}`);
         row = saved; refs.set('main', incoming.oid);
     });
+    await t.test('one wide-file edit above 300 commits completes in one delivery with bounded state I/O', async () => {
+        const saved = structuredClone(row), originalRef = refs.get('main');
+        const files = Object.fromEntries(Array.from({ length: 2000 }, (_, i) => [`wide/file-${i}`, `value-${i}`]));
+        const root = await git.save(files, incoming.oid, 'wide base', 'Owner');
+        let base = root.oid;
+        const tree = new TextDecoder().decode((await git.read(base)).body).match(/^tree (\w+)/)[1];
+        for (let i = 0; i < 300; i++) {
+            const commit = await object('commit', Buffer.from(`tree ${tree}\nparent ${base}\nauthor A <a@b> ${i} +0000\ncommitter A <a@b> ${i} +0000\n\nhistory ${i}\n`));
+            await bucket.put(git.key(commit.oid), deflateSync(commit.raw)); base = commit.oid;
+        }
+        for (const [key, value] of bucket.data) if (key.includes('/objects/')) remoteBucket.data.set(key.replace('repo/', 'remote/'), value);
+        refs.set('main', base);
+        const changed = await git.save({ ...files, 'wide/file-0': 'changed' }, base, 'small delta', 'Worker');
+        const ready = decodeState(row.state); ready.head = changed.oid; ready.revisions[changed.oid] = changed.meta;
+        ready.sync.lastSyncedHead = base; ready.sync.lastRemoteHead = base; ready.sync.cloud.nextAttemptAt = Date.now() + 240000;
+        const { wakeIntegratedSync } = await import('../lib/avc/cloud-wakeup.ts');
+        assert(wakeIntegratedSync(ready)); row.state = encodeState(ready);
+        const reads = db.reads, writes = db.writes;
+        await runCloudSync('repo', key);
+        const result = decodeState(row.state);
+        assert.equal(result.sync.status, 'idle'); assert.equal(result.sync.run, undefined); assert.equal(refs.get('main'), changed.oid);
+        assert.equal(result.sync.lastSyncedHead, changed.oid);
+        assert(db.writes - writes <= 12, `D1 writes: ${db.writes - writes}`);
+        assert(db.reads - reads <= 35, `D1 reads: ${db.reads - reads}`);
+        const incomingEdit = await remoteGit.save({ ...files, 'wide/file-0': 'changed', 'wide/file-1': 'remote edit' }, changed.oid, 'small incoming delta', 'Owner');
+        refs.set('main', incomingEdit.oid); delete result.sync.cloud.nextAttemptAt; row.state = encodeState(result);
+        const objectReads = bucket.reads.length;
+        await runCloudSync('repo', key);
+        const imported = decodeState(row.state);
+        assert.equal(imported.sync.status, 'idle'); assert.equal(imported.head, incomingEdit.oid);
+        assert(bucket.reads.length - objectReads <= 20, `local reads: ${bucket.reads.length - objectReads}`);
+        row = saved; refs.set('main', originalRef); mainPushes--;
+    });
     // Journey changes are uploaded by object; a successful GitHub update whose
     // acknowledgement is lost resumes from persisted publish state exactly once.
     const outgoing = await git.save({ file: 'outgoing', added: 'new blob' }, incoming.oid, 'Journey change', 'Worker');
@@ -381,7 +414,7 @@ test('hosted fast-forward import completes without a file/tree snapshot or token
         await deliver();
         assert.equal(decodeState(row.state).head, localSibling.oid);
         assert.equal(decodeState(row.state).sync.cloud.work.phase, 'import');
-        assert(queued.length > 0); assert.equal(queued[0].options.delaySeconds, 5);
+        assert(queued.length > 0); assert.equal(queued[0].options.delaySeconds, 0);
         for (let turns = 0; turns < 30 && decodeState(row.state).sync.status !== 'conflict'; turns++) await deliver();
         const conflict = decodeState(row.state);
         assert(acknowledged > 1); assert.equal(conflict.sync.status, 'conflict'); assert.equal(conflict.head, localSibling.oid);

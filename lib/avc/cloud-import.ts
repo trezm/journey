@@ -2,9 +2,9 @@ import { deflateSync } from 'node:zlib';
 import { insist } from './core.ts';
 import { GitStore, decodeObject, object, parseTree, references } from './git.ts';
 
-export type ImportItem = { hash: string; type: 'commit' | 'tree' | 'blob'; expanded?: boolean; depth?: number; path?: string; closure?: TreeClosure };
+export type ImportItem = { hash: string; type: 'commit' | 'tree' | 'blob'; expanded?: boolean; depth?: number; path?: string; closure?: TreeClosure; baseline?: string };
 type TreeClosure = { version: 1; hash: string; depth: number; path: number };
-export type ImportWork = { remote: string | null; todo: ImportItem[]; seen: string[]; importVersion?: 1 };
+export type ImportWork = { remote: string | null; todo: ImportItem[]; seen: string[]; importVersion?: 1; importBaselineTree?: string };
 export const IMPORT_BATCH = 100;
 const MAX_OBJECTS = 50_000;
 
@@ -27,7 +27,7 @@ function certificate(value: unknown, hash: string): value is TreeClosure {
  * create certificates. A present loose tree (including an orphan) is no proof.
  * Summary bounds are relative, so reuse at a deeper/longer path is checked too.
  */
-export async function importCloudBatch(project: string, bucket: R2Bucket, work: ImportWork, trusted: Set<string>, readRemote: (hash: string, type: ImportItem['type']) => Promise<Uint8Array>, active: () => void, deadline: number) {
+export async function importCloudBatch(project: string, bucket: R2Bucket, work: ImportWork, trusted: Set<string>, readRemote: (hash: string, type: ImportItem['type']) => Promise<Uint8Array>, active: () => void, deadline: number, baselineHead?: string) {
     const git = new GitStore(bucket, project);
     const key = (hash: string) => `${project}/verified-import-trees/v1/${hash}`;
     // Legacy seen entries were recorded before descendants completed. Restart
@@ -35,6 +35,12 @@ export async function importCloudBatch(project: string, bucket: R2Bucket, work: 
     if (work.importVersion !== 1) {
         insist(work.remote, 'invalid_revision', 'Import requires a remote head.', 400);
         work.todo = [{ hash: work.remote, type: 'commit' }]; work.seen = []; work.importVersion = 1;
+    }
+    if (baselineHead && trusted.has(baselineHead) && !work.importBaselineTree) {
+        const baseline = await git.read(baselineHead);
+        insist(baseline.type === 'commit', 'invalid_object', 'Import baseline requires a commit.', 400);
+        references('commit', baseline.body);
+        work.importBaselineTree = new TextDecoder().decode(baseline.body).split('\n\n')[0].match(/^tree ([a-f0-9]{40})$/m)![1];
     }
     const seen = new Set(work.seen);
     const complete = (item: ImportItem, closure?: TreeClosure) => {
@@ -82,12 +88,24 @@ export async function importCloudBatch(project: string, bucket: R2Bucket, work: 
             item.closure = { version: 1, hash: item.hash, depth: 0, path: entries.reduce((max, entry) => Math.max(max, entry.name.length), 0) };
             checkContext(item, item.closure);
             item.expanded = true;
-            next = entries.filter(entry => entry.mode !== '160000').map(entry => ({ hash: entry.oid, type: entry.mode === '40000' ? 'tree' : 'blob', depth: (item.depth ?? 0) + 1, path: `${item.path ?? ''}${entry.name}/` }));
+            const old = item.baseline ? await git.read(item.baseline) : null;
+            insist(!old || old.type === 'tree', 'invalid_object', 'Import baseline requires a tree.', 400);
+            const baseline = new Map(old ? parseTree(old.body).map(entry => [entry.name, entry]) : []);
+            next = entries.flatMap(entry => {
+                if (entry.mode === '160000') return [];
+                const type = entry.mode === '40000' ? 'tree' : 'blob', previous = baseline.get(entry.name);
+                const sameType = previous && (previous.mode === '40000' ? 'tree' : previous.mode === '160000' ? 'commit' : 'blob') === type;
+                // Canonical baseline closure proves these exact blobs exist.
+                // Trees still use certificates or accumulate exact summaries;
+                // skipping them blindly would understate future path/depth bounds.
+                if (type === 'blob' && sameType && previous.oid === entry.oid) return [];
+                return [{ hash: entry.oid, type, baseline: type === 'tree' && sameType ? previous.oid : undefined, depth: (item.depth ?? 0) + 1, path: `${item.path ?? ''}${entry.name}/` }];
+            });
         } else {
             if (item.type === 'commit') {
                 references('commit', body);
                 const header = new TextDecoder().decode(body).split('\n\n')[0];
-                next = [...header.matchAll(/^(tree|parent) ([a-f0-9]{40})$/gm)].map(entry => ({ hash: entry[2], type: entry[1] === 'tree' ? 'tree' : 'commit', ...(entry[1] === 'tree' ? { depth: 0, path: '' } : {}) }));
+                next = [...header.matchAll(/^(tree|parent) ([a-f0-9]{40})$/gm)].map(entry => ({ hash: entry[2], type: entry[1] === 'tree' ? 'tree' : 'commit', ...(entry[1] === 'tree' ? { depth: 0, path: '', baseline: work.importBaselineTree } : {}) }));
             }
             complete(item);
         }

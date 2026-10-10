@@ -225,6 +225,21 @@ test('integration retains all 29 authorization, review, reservation, and idempot
       return {journey,revision:patch.revision,tokens};
     }
     const integration = (f,c,extra={}) => ({action:'integrate',project:f.project,requestId:crypto.randomUUID(),journey:c.journey,revision:c.revision,head:read(f.project).head,cursor:read(f.project).integrationCursor,tokens:c.tokens,...extra});
+    await t.test('integrating wakes hosted sync after commit and queue failure still returns success', async () => {
+      for (const unavailable of [false, true]) {
+        const f = await fixture('immediate hosted sync'), c = await candidate(f);
+        update(f.project, s => { s.sync = { remote: 'https://github.com/team/repo', branch: 'main', enabled: true, status: 'idle', updatedAt: 1, cloud: { generation: 'g', credential: 'c', failures: 0, nextAttemptAt: Date.now() + 240000 } }; });
+        let deliveries = 0;
+        globalThis.__ownerValidationEnvironment.GITHUB_SYNC_QUEUE = { send: async (body, options) => {
+          deliveries++; assert.deepEqual(body, { project: f.project }); assert.deepEqual(options, { delaySeconds: 0 });
+          const committed = read(f.project); assert.equal(committed.journeys[0].status, 'integrated'); assert.equal(committed.sync.cloud.nextAttemptAt, undefined);
+          if (unavailable) throw Error('queue unavailable');
+        } };
+        const result = await request(integration(f, c));
+        assert.equal(read(f.project).head, result.revision); assert.equal(deliveries, 1);
+      }
+      delete globalThis.__ownerValidationEnvironment.GITHUB_SYNC_QUEUE;
+    });
     const assertions = [];
     for (const leaseCase of ['zero','expired','own-live']) {
       const f=await fixture(leaseCase), c=await candidate(f);

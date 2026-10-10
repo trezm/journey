@@ -12,7 +12,7 @@ const worker = {
             if (env.GITHUB_SYNC_KEY && typeof message.body.project === 'string') {
                 await runCloudSync(message.body.project, env.GITHUB_SYNC_KEY);
                 const sync = (await readProject(message.body.project)).state.sync;
-                if (sync?.enabled && sync.status === 'running' && sync.cloud?.work && !sync.cloud.lease) await env.GITHUB_SYNC_QUEUE.send({ project: message.body.project }, { delaySeconds: 5 });
+                if (sync?.enabled && sync.status === 'running' && sync.cloud?.work && !sync.cloud.lease) await env.GITHUB_SYNC_QUEUE.send({ project: message.body.project }, { delaySeconds: 0 });
             }
             message.ack();
         }
