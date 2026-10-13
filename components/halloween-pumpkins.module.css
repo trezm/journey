@@ -1,0 +1,10 @@
+.decorations { padding: 0 24px 8px; display: flex; align-items: center; justify-content: center; gap: 14px; color: var(--muted-foreground, #657186); }
+.toggle { display: flex; align-items: center; gap: 9px; border: 0; border-radius: 7px; background: transparent; padding: 8px; color: inherit; font: inherit; font-size: 12px; cursor: pointer; }
+.toggle:hover { background: color-mix(in srgb, currentColor 7%, transparent); }
+.toggle:focus-visible { outline: 2px solid #d98227; outline-offset: 2px; }
+.toggleState { margin-left: auto; font-size: 11px; opacity: .65; }
+.toggle[aria-pressed="true"] > :first-child { color: #d98227; }
+.pair { display: flex; align-items: flex-end; justify-content: center; gap: 4px; height: 58px; pointer-events: none; }
+.pumpkin { width: 61px; height: 58px; }
+.smallPumpkin { width: 47px; height: 45px; transform: rotate(7deg); }
+@media (max-width: 700px), (max-height: 620px) { .pair { height: 45px; } .pumpkin { width: 47px; height: 45px; } .smallPumpkin { width: 36px; height: 35px; } }
