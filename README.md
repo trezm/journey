@@ -1,24 +1,42 @@
 # Journey — Agentic Version Control
 
-Working MVP of journey-based version control. A journey contains described changesets; changesets contain immutable patches and version-anchored range leases. Intermediate revisions stay isolated. The completed journey integrates as a Git commit on `main`.
+Open-source MVP of journey-based version control. A journey contains described changesets; changesets contain immutable patches and version-anchored range leases. Intermediate revisions stay isolated. The completed journey integrates as a Git commit on `main`.
+
+## Run locally
+
+Use Node.js 22.13+ (Node 22 LTS recommended), Git, and the exact pnpm version in `package.json`. Install pnpm with your preferred package-manager setup, then:
+
+```sh
+git clone https://github.com/trezm/journey.git
+cd journey
+pnpm install --frozen-lockfile
+pnpm db:migrate:local
+pnpm dev
+```
+
+Open `http://127.0.0.1:5173` and register a username/email/password account. D1, R2 and Queue bindings run locally under `.wrangler/state`. Basic development needs no Cloudflare login, hosted Journey account, OAuth credentials or secrets. The checked-in deployment configuration has a placeholder database ID and rejects remote deployment until you configure your own resources.
+
+For optional provider connections, copy [.dev.vars.example](.dev.vars.example) to ignored `.dev.vars` and follow [OAuth setup](docs/OAUTH.md). For hosting, use the [Cloudflare guide](docs/cloudflare.md). The generated `dist/server/wrangler.json` is build output, not configuration to edit.
+
+[Contributing](CONTRIBUTING.md) · [Security reporting](SECURITY.md) · [MIT license](LICENSE)
 
 ## Implemented
 
 - Human repository workspace, code editor, patch timeline, exact-revision review and approvals.
-- Repository-scoped agent credentials and HTTP API. Agents own their journeys and may comment on other reviews; approvals require a human.
+- Repository-scoped agent credentials and HTTP API. Agents own their journeys and may comment on other reviews; approval requires a human or an owner-enabled coordinator reviewing another worker.
 - Inclusive line ranges tied to Git revisions; conservative internal range remapping; whole-file fallback; atomic multi-scope acquisition.
 - Ten-minute draft leases, explicit refresh, generation fencing, durable waiting requests, availability hints and explicit retry. Submit for review retains valid locks indefinitely until integration or abandonment, including through further updates and reconciliation.
 - Immutable Git blobs, trees and commits stored in R2; authenticated dumb-HTTP Git cloning. Agents publish through the coordinated API, rather than raw Git push.
 - Append-only review, patch, lease and integration events; per-journey inboxes with replay cursors.
 - Required breaking-change declarations (explicit empty lists allowed), per-integration dispositions, stale-head rejection and repository-state compare-and-swap publication.
-- Owner integration and the Integrate button require approval of the exact current revision. Worker approval remains configurable in repository settings. Builds and tests are deliberately outside the protocol.
+- Owner integration and the Integrate button require approval of the exact current revision. Worker integration and coordinator approval are configurable in repository settings; self-approval is forbidden. Builds and tests are deliberately outside the protocol.
 - Email/password accounts and hashed sessions for Cloudflare hosting. Public identity headers are never accepted as authentication.
 - Cloudflare-hosted two-way GitHub synchronization: five-minute polling, incremental exact Git-object transfers, fenced push leases, and preserved conflict branches with explicit owner recovery. No local sync process is required.
 
 ## Import and connect Codex
 
 1. Create an empty repository in the workspace (the Rust example is optional).
-2. With Node.js 22+, Git, and curl installed, copy the one-line installer from **Connect & import**. On the production host (once the installer rollout is complete):
+2. With Node.js 22+, Git, and curl installed, copy the one-line installer from **Connect & import**. For the official hosted service:
 
 ```sh
 curl -fsSL https://journey.peter-s-mertz.workers.dev/install.sh | bash
@@ -43,7 +61,7 @@ Imported untouched non-text/large files and modes remain in every generated comm
 
 `POST /api/connect` is owner-only and downloads a new coordinator connection. `POST /api/import?project=ID&op=start|objects|finish|cancel` is owner/coordinator-only; finish verifies reference closure before publishing the imported head. Import is allowed only before any journeys begin and once per destination repository. A worker cannot import, delegate, change policy or approve a journey.
 
-## Development
+## Development and hosting
 
 Node.js 22.13+ and Git are required. Install with `pnpm install --frozen-lockfile`, initialize local D1 with `pnpm db:migrate:local`, and run `pnpm dev`. `pnpm deploy:check` builds the complete Cloudflare Worker and validates its bundle without publishing. `pnpm start --port 4173` serves the built Worker locally; both use simulated D1/R2 under `.wrangler/state`.
 
@@ -102,7 +120,7 @@ node cli/agent.mjs patch JOURNEY_ID CHANGESET_ID src/users.rs ./users.rs 'Handle
 
 ## Git remotes and synchronization
 
-In repository **Settings**, enter the HTTPS GitHub repository URL, target branch and a fine-grained token authorized for that repository with Contents read/write permission (and Workflows permission when changing workflow files). Cloudflare polls every five minutes and continues larger transfers through bounded Queue deliveries. GitHub changes enter Journey and accepted Journey commits propagate to GitHub without downloading a runner or checking out a repository in the Worker.
+In repository **Settings**, connect your GitHub or GitLab account, choose a writable repository and target branch, then enable sync. GitHub also supports a repository-scoped fine-grained token with Contents read/write permission (and Workflows permission when changing workflow files). See [provider connections](docs/OAUTH.md). Cloudflare polls provider changes every five minutes and continues larger transfers through bounded Queue deliveries. Provider changes enter Journey and accepted Journey commits propagate to the provider without downloading a runner or checking out a repository in the Worker.
 
 The service reuses Journey's R2 Git object store and transfers only missing objects, preserving exact commit bytes and file modes. Exact old-SHA push leases refuse moved remote heads. Divergent histories pause writes and preserve the original Journey head on a conflict branch; the owner selects a resolved GitHub commit. External updates invalidate current locks conservatively; affected journeys retain their work and reconcile before reacquiring.
 
@@ -125,9 +143,12 @@ This legacy one-way bridge clones this repository and pushes only accepted `main
 ## Validation
 
 ```sh
-node --experimental-strip-types --test tests/protocol.test.mjs
-node node_modules/typescript/bin/tsc --noEmit --incremental false
+pnpm test
+pnpm typecheck
+pnpm deploy:check
 ```
+
+CI runs the frozen dependency install, deterministic test suite, type check and bundle dry run; it does not deploy. `pnpm lint` is available separately, with existing legacy lint findings not yet enforced by CI.
 
 Tests cover non-overlapping merge, range remapping, lease expiry/fencing, waiting notification, atomic acquisition, deadlock prevention, patch coverage, declaration/reconciliation gates and lock return. Git interoperability is verified with the real `git fsck` and `git show` commands. `tests/http-smoke.mjs` exercises the running D1/R2 API with two authenticated agents. `tests/cli-smoke.mjs` exercises the downloadable CLI from connection/import through two isolated worker edits, human review, integration and reconciliation, verifying original branches, tags, binaries, modes and Git history with real Git.
 
@@ -135,4 +156,4 @@ Tests cover non-overlapping merge, range remapping, lease expiry/fencing, waitin
 
 Import limits and text-edit limits are described above. Journey metadata remains bounded at 1 MB/request, 100 changesets/journey, 1,800 durable events/repository and 1.5 MB/stored repository metadata (up to 12 MB before lossless compression). Limits fail explicitly. Untouched binary, symlink, executable and submodule entries are preserved, but editing binaries or modes, rename identity tracking, arbitrary server-side CI execution, secret scanning, email delivery/password recovery, organization membership and webhooks remain unimplemented. Git LFS payloads and submodule contents stay external. Recordings capture explicit patches, explanations, decisions and CLI command results, not private model reasoning. Captured and reconstructed entries are labeled separately. The coordinator uses transactional D1 compare-and-swap over repository state; a dedicated Durable Object is the intended high-contention successor.
 
-MIT licensed.
+MIT licensed; preserve [LICENSE](LICENSE) and vendored third-party notices when redistributing. `private: true` prevents accidental npm publication; it does not restrict the source license.

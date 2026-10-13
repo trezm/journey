@@ -2,7 +2,7 @@
 
 Sign in to Journey with your username or email and password. In an owned repository, open **Settings → Git publishing & sync**, connect a GitHub or GitLab account, choose a repository, select its branch, enable sync, and save. OAuth connects a Git provider to your existing Journey account; it does not create a second Journey login or an organization.
 
-This version accepts writable personal GitHub and GitLab repositories only. Provider organization/group repositories and Journey organizations are not supported yet.
+GitHub accepts writable personal repositories and writable repositories in organizations you actively belong to; provider permissions and organization OAuth restrictions still apply. GitLab currently accepts writable personal repositories only. GitLab groups and Journey organizations are not supported yet.
 
 Connections belong to the signed-in account. Repository owners alone can inspect provider accounts, list repositories, configure sync, or reconnect credentials. Public Journey readers and repository agents cannot inspect provider connections or authorize them. Public/private visibility in Journey remains separate from the provider repository's visibility.
 

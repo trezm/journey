@@ -20,7 +20,7 @@ const encoder = new TextEncoder(), decoder = new TextDecoder();
 export function provider(value: unknown): Provider { insist(value === 'github' || value === 'gitlab', 'invalid_provider', 'Choose GitHub or GitLab.', 400); return value; }
 export async function hash(value: string) { return Buffer.from(await crypto.subtle.digest('SHA-256', encoder.encode(value))).toString('hex'); }
 function random() { return Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64url'); }
-export function oauthConfig(p: Provider, settings: OAuthEnvironment = env): Config {
+export function oauthConfig(p: Provider, settings: OAuthEnvironment = env as Env & OAuthEnvironment): Config {
     const client = p === 'github' ? settings.AVC_GITHUB_CLIENT_ID : settings.AVC_GITLAB_CLIENT_ID;
     const secret = p === 'github' ? settings.AVC_GITHUB_CLIENT_SECRET : settings.AVC_GITLAB_CLIENT_SECRET;
     insist(settings.AVC_OAUTH_ORIGIN && client && secret, 'oauth_unavailable', `The deployment has not configured ${p === 'github' ? 'GitHub' : 'GitLab'} OAuth.`, 503);

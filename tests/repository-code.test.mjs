@@ -7,6 +7,7 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import ts from 'typescript';
 import { LatestResource, codeRevision, codePath, repositorySelection } from '../lib/repository-code.ts';
+import * as commentShortcut from '../lib/comment-shortcut.ts';
 import * as reviewHelpers from '../lib/avc/review.ts';
 import * as requestHelpers from '../lib/avc/client.ts';
 import { isCanonicalUpdate } from '../lib/avc/core.ts';
@@ -128,6 +129,8 @@ function renderCodeWorkspace(options = {}) {
             useRepositoryFiles: (project, revision) => { options.onFiles?.(project, revision); return ({ key: 'repo:main', status: 'ready', error: '', files: { 'README.md': 'Imported repository code' }, reload: async () => {} }); },
         };
         if (name === '@/components/live-lock-map') return { LiveLockMap: props => React.createElement('section', { 'aria-label': 'Live repository map', 'data-project': props.project }) };
+        if (name === '@/components/review-threads') return { ReviewThreads: () => null };
+        if (name === '@/components/halloween-pumpkins') return { HalloweenPumpkins: () => null };
         if (name === '@/components/account-auth') return { AccountAuth: () => null };
         if (name === '@/components/public-repository') return { PublicRepository: () => React.createElement('section', null, 'Public accepted repository code') };
         if (name === '@/components/changeset-detail') return { ChangesetDetail: props => React.createElement('section', null, `Changeset detail: ${props.changeset.description}`) };
@@ -138,6 +141,7 @@ function renderCodeWorkspace(options = {}) {
         if (name === '@/components/cli-install') return { CliInstall: () => null };
         if (name === '@/hooks/use-workspace-route') return { useWorkspaceRoute: () => ({ project: 'repo', selected: options.selected ?? '', selectedChangeset: options.selectedChangeset ?? '', tab: options.tab ?? 'code', modeChoice: { project: 'repo', mode: options.mode ?? 'repository' }, pathChoice: { project: 'repo', path: 'README.md' }, setProject: () => {}, setSelected: () => {}, setTab: () => {}, setModeChoice: () => {}, setPathChoice: () => {}, hrefFor: () => '/repositories/repo', followLink: () => {} }) };
         if (name === '@/lib/repository-code') return { codeRevision, codePath, repositorySelection };
+        if (name === '@/lib/comment-shortcut') return commentShortcut;
         if (name === '@/lib/avc/review') return reviewHelpers;
         if (name === '@/lib/avc/core') return { isCanonicalUpdate };
         if (name === '@/lib/avc/client') return { ...requestHelpers, jsonFetch: options.requestJson ?? requestHelpers.jsonFetch };
@@ -211,14 +215,23 @@ test('Integrate button requires a current authorized approval even when worker a
         ['allowed coordinator', [{ ...approval, authority: 'coordinator' }], true, false],
         ['current owner', [approval], false, false],
     ]) {
-        let integrate;
+        let integrate, approve;
         const journey = { id: 'j', head: 'head', status: 'review', changesets: [], reviews, manifest: [], manifestDeclared: true };
         renderCodeWorkspace({
             selected: 'j', tab: 'review', journeys: [journey],
             state: { requireApproval: false, allowCoordinatorApproval, leases: [{ journey: 'j', retained: true, token: 'token' }] },
-            onButton: button => { if (button.className?.includes('integrate-button')) integrate = button; },
+            onButton: button => {
+                if (button.className?.includes('integrate-button')) integrate = button;
+                if (React.Children.toArray(button.children).includes('Approve revision')) approve = button;
+            },
         });
-        assert.equal(integrate?.disabled, disabled, label);
+        if (disabled) {
+            assert.equal(integrate, undefined, label);
+            assert.ok(approve, label);
+        } else {
+            assert.equal(integrate?.disabled, false, label);
+            assert.equal(approve, undefined, label);
+        }
     }
 });
 

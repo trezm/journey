@@ -1,8 +1,6 @@
 # Deploy Journey to Cloudflare Workers
 
-The production workspace is now `https://journey.peter-s-mertz.workers.dev`, using the configured `journey` D1 database and private `journey-git` R2 bucket. Its original repository history and existing agent credentials were copied and checked against a complete private source backup. The checked-in production configuration selects username/email/password accounts. The existing owner is bootstrapped with the same verified owner ID; repository ownership and agent credentials stay unchanged. Cloudflare Access configuration is retained for rollback, with the cutover sequence described below.
-
-The former ChatGPT Site runs only the retirement handler in `build/sites-worker.ts`: browser navigation redirects to the Cloudflare origin, while old API, export and mutation requests return `410 site_moved`. It cannot read or write the preserved source storage. Keep the source database and bucket for rollback; do not redeploy the previous writable application without first pausing Cloudflare writes and reconciling all subsequent changes. Private connection profiles must use the Cloudflare origin and omit the obsolete `siteToken`; repository credentials remain unchanged.
+The checked-in configuration is a self-hosting template: it uses a placeholder D1 ID and username/email/password authentication, with no production Access audience, OAuth application IDs or owner mapping. Configure resources in your own account before publishing.
 
 Journey runs its interface, authentication, API and authenticated Git endpoint in one Cloudflare Worker. D1 stores accounts, sessions, agent credentials and repository protocol state. R2 stores Git objects, cached trees and snapshots. `wrangler.jsonc` is the checked-in source for bindings; the Cloudflare Vite plugin generates `dist/server/wrangler.json` during each build. Never edit generated configuration. No ChatGPT Site, connector service, platform identity header or platform service token is needed.
 
@@ -17,7 +15,7 @@ pnpm cf:types
 pnpm dev
 ```
 
-Open `http://127.0.0.1:5173`, then create a username/email/password account. Local development uses simulated D1/R2 under `.wrangler/state`; the configured production resources are not contacted. The checked-in D1 ID identifies production; local commands still use simulated storage. Use separate bindings for staging, and never add `remote: true` to local bindings unintentionally. The compatibility date matches the pinned local Workers runtime. Upgrade the locked Cloudflare packages together before advancing the date to enable newer runtime behavior.
+Open `http://127.0.0.1:5173`, then create a username/email/password account. Local development uses simulated D1/R2 under `.wrangler/state`; no Cloudflare account or production resources are needed. The checked-in placeholder D1 ID is accepted for local commands and rejected by remote migration/deployment scripts. Use separate bindings for staging, and never add `remote: true` to local bindings unintentionally. The compatibility date matches the pinned local Workers runtime. Upgrade the locked Cloudflare packages together before advancing the date to enable newer runtime behavior.
 
 Verify the production bundle without publishing:
 
@@ -61,7 +59,7 @@ If moving an existing Site with repositories, follow the migration section first
    pnpm cf:check
    ```
 
-   Replace `YOUR_D1_UUID` with the returned database ID. You can bind existing resources instead. `cf:configure` only updates local configuration; it does not create or deploy anything. Commit the non-secret resource configuration so subsequent builds use the same storage. Choose unique resource/Worker names if these names are already in use.
+   Replace `YOUR_D1_UUID` with the returned database ID. You can bind existing resources instead. `cf:configure` only updates local configuration; it does not create or deploy anything. Keep deployment-specific configuration in your deployment checkout or private deployment configuration, rather than replacing the upstream template. `cf:configure` writes `wrangler.jsonc` locally; inspect the diff before committing. Choose unique resource/Worker names if these names are already in use.
 
 3. Set `GITHUB_SYNC_KEY` as a private Worker secret containing 32 random bytes encoded as 64 hexadecimal characters. Submit it through Wrangler's secret prompt; never put it in source, command arguments or logs:
 

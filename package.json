@@ -19,7 +19,9 @@
     "db:migrate:local": "node scripts/cloudflare.mjs wrangler d1 migrations apply DB --local --persist-to .wrangler/state",
     "db:migrate:remote": "node scripts/cloudflare.mjs migrate-remote",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
-    "db:generate": "drizzle-kit generate"
+    "db:generate": "drizzle-kit generate",
+    "test": "node --experimental-strip-types --test --test-concurrency=2 tests/*.test.mjs",
+    "typecheck": "tsc --noEmit --incremental false"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
@@ -76,5 +78,15 @@
       "sharp": "0.35.4"
     }
   },
-  "packageManager": "pnpm@11.25.0"
+  "packageManager": "pnpm@11.25.0",
+  "description": "Journey-based version control for parallel coding agents, with isolated patches, range locks and exact-revision review.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/trezm/journey.git"
+  },
+  "homepage": "https://github.com/trezm/journey#readme",
+  "bugs": {
+    "url": "https://github.com/trezm/journey/issues"
+  }
 }

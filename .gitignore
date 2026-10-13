@@ -49,3 +49,8 @@ next-env.d.ts
 .dev.vars*
 !.dev.vars.example
 /.pnpm-store/
+
+# Journey credentials and TypeScript build cache
+/.journey/
+journey-connection*.json
+*.tsbuildinfo

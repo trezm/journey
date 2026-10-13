@@ -1,0 +1,20 @@
+# Basic local development works without this file.
+# Copy to .dev.vars only when configuring optional provider/Access features.
+# Never commit the filled .dev.vars file.
+
+# GitHub/GitLab connections and hosted sync: generate a private, random 32-byte
+# encryption key (64 lowercase hex characters) and preserve it across restarts.
+# GITHUB_SYNC_KEY=replace-with-your-own-64-character-hex-key
+# AVC_OAUTH_ORIGIN=http://localhost:5173
+# AVC_GITHUB_CLIENT_ID=your-own-github-client-id
+# AVC_GITHUB_CLIENT_SECRET=your-own-github-client-secret
+# AVC_GITLAB_CLIENT_ID=your-own-gitlab-application-id
+# AVC_GITLAB_CLIENT_SECRET=your-own-gitlab-client-secret
+# See docs/OAUTH.md for callbacks and provider configuration.
+
+# Access mode is optional. Set AVC_AUTH_MODE=access and all three Access settings
+# together, using an independently verified owner mapping. See docs/cloudflare.md.
+# AVC_AUTH_MODE=access
+# AVC_ACCESS_TEAM_DOMAIN=https://your-team.cloudflareaccess.com
+# AVC_ACCESS_AUD=your-own-access-application-audience
+# AVC_ACCESS_OWNER_MAP={"owner@example.com":"verified-existing-owner-id"}

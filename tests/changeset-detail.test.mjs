@@ -91,6 +91,8 @@ function routeFixture(status = 'working', denied = false) {
     const state = { journeys: [j], receipts: {}, events: [], sequence: 0 };
     let authCalls = 0;
     const modules = {
+        'cloudflare:workers': { env: {} },
+        '@/lib/avc/cloud-wakeup': {},
         '@/lib/avc/core': core,
         '@/lib/avc/review-target': { validateReviewTarget, reviewReplyTarget },
         '@/lib/avc/sync': { assertSyncWritable },

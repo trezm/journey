@@ -42,7 +42,7 @@
     {
       "binding": "DB",
       "database_name": "journey",
-      "database_id": "9bc4583f-c7b0-4a34-a1e6-e38063214c2c",
+      "database_id": "00000000-0000-4000-8000-000000000000",
       "migrations_dir": "./drizzle"
     }
   ],
@@ -54,11 +54,6 @@
   ],
   "preview_urls": false,
   "vars": {
-    "AVC_ACCESS_TEAM_DOMAIN": "mertz.cloudflareaccess.com",
-    "AVC_ACCESS_AUD": "875efad6b43955c6a936e44b379a3074a7bd71f7309e8539cda974f4d39d0681",
-    "AVC_OAUTH_ORIGIN": "https://journey.peter-s-mertz.workers.dev",
-    "AVC_GITHUB_CLIENT_ID": "Ov23liSxarsWsiRzCSbP",
-    "AVC_GITLAB_CLIENT_ID": "d8b73200da34d147977edf840ae2cbf5e39facd5be56fbfb1bb259ec47d31ef3",
     "AVC_AUTH_MODE": "password"
   }
 }

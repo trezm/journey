@@ -112,8 +112,13 @@ test('owner OAuth connection drives hosted GitLab export/import across queue con
     const id = await oauth.hash('owner:gitlab'), context = `oauth-connection:${id}:owner:gitlab`;
     sqlite.prepare('UPDATE oauth_connections SET credential=? WHERE id=?').run(await oauth.encrypt(JSON.stringify({ access: 'hosted-private-token' }), context, secret), id);
     const original = globalThis.fetch; t.after(() => { globalThis.fetch = original; });
+    // Advance a fixture clock for provider operations to exercise queue
+    // checkpoints deterministically without a large or slow repository.
+    const originalNow = Date.now; let fixtureNow = originalNow();
+    Date.now = () => fixtureNow; t.after(() => { Date.now = originalNow; });
     let pushes = 0;
     globalThis.fetch = async (url, init = {}) => {
+        fixtureNow += 1_000;
         const parsed = new URL(url); assert.equal(parsed.hostname, 'gitlab.com'); assert.equal(init.redirect, 'manual');
         if (parsed.pathname.endsWith('/info/refs')) return new Response(execFileSync('git', ['upload-pack', '--stateless-rpc', '--advertise-refs', path]));
         if (parsed.pathname.endsWith('/git-upload-pack') || parsed.pathname.endsWith('/git-receive-pack')) {
