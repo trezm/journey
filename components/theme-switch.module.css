@@ -26,3 +26,6 @@
 @media (max-width: 700px) {
     .switch { right: 12px; bottom: 12px; }
 }
+
+:global(.halloween) .switch { border-color: var(--primary); box-shadow: 0 5px 22px rgb(239 140 62 / 16%); }
+:global(.halloween) .switch > svg { color: var(--primary); }

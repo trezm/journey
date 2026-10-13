@@ -13,7 +13,7 @@
 .comments header { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 16px; background: #f6f8fa; color: #64748b; font-size: .8rem; overflow-wrap: anywhere; }
 .comments strong { color: var(--muted-foreground); font-weight: 400; }
 .comments time { margin-left: auto; }
-.comments p, :global(.dark) .comments p { margin: 0; padding: 16px; color: var(--foreground); white-space: pre-wrap; overflow-wrap: anywhere; }
+.comments p, :global(:is(.dark, .halloween)) .comments p { margin: 0; padding: 16px; color: var(--foreground); white-space: pre-wrap; overflow-wrap: anywhere; }
 .comments a { display: inline-block; margin: 12px 16px 0; font-size: .8rem; color: #2563eb; }
 .composer { display: grid; gap: 10px; }
 .composer label { font-size: .85rem; font-weight: 600; }
@@ -24,16 +24,16 @@
 .error { color: #b42318; font-size: .85rem; }
 @media (max-width: 600px) { .comments time { margin-left: 0; width: 100%; } }
 
-:global(.dark) .heading { border-color: #344258; }
-:global(.dark) .heading p,:global(.dark) .note,:global(.dark) .detail h3 span,:global(.dark) .empty { color: #a3b1c5; }
-:global(.dark) .empty,:global(.dark) .comments header { background: #202d40; }
-:global(.dark) .comments li { border-color: #344258; }
-:global(.dark) .comments header { color: var(--muted-foreground); }
-:global(.dark) .comments strong { color: var(--muted-foreground); }
-:global(.dark) .comments a { color: #8ab4ff; }
-:global(.dark) .composer textarea { background: #182335; border-color: #3a4960; color: #e6edf7; }
-:global(.dark) .composer button { background: #238636; color: #fff; }
-:global(.dark) .error { color: #ffb4bc; }
+:global(:is(.dark, .halloween)) .heading { border-color: #344258; }
+:global(:is(.dark, .halloween)) .heading p,:global(:is(.dark, .halloween)) .note,:global(:is(.dark, .halloween)) .detail h3 span,:global(:is(.dark, .halloween)) .empty { color: #a3b1c5; }
+:global(:is(.dark, .halloween)) .empty,:global(:is(.dark, .halloween)) .comments header { background: #202d40; }
+:global(:is(.dark, .halloween)) .comments li { border-color: #344258; }
+:global(:is(.dark, .halloween)) .comments header { color: var(--muted-foreground); }
+:global(:is(.dark, .halloween)) .comments strong { color: var(--muted-foreground); }
+:global(:is(.dark, .halloween)) .comments a { color: #8ab4ff; }
+:global(:is(.dark, .halloween)) .composer textarea { background: #182335; border-color: #3a4960; color: #e6edf7; }
+:global(:is(.dark, .halloween)) .composer button { background: #238636; color: #fff; }
+:global(:is(.dark, .halloween)) .error { color: #ffb4bc; }
 
 .reviewMeta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 0 16px 14px; color: #64748b; font-size: .75rem; }
 .reviewMeta span { border: 1px solid #dce3ed; padding: 2px 6px; border-radius: 4px; }
@@ -45,8 +45,8 @@
 .navigation button:disabled { opacity: .4; cursor: default; }
 .navigation span { color: #64748b; font-size: .8rem; white-space: nowrap; }
 .heading { scroll-margin-top: 82px; }
-:global(.dark) .navigation { background: #182335; border-color: #344258; box-shadow: 0 4px 16px #0004; }
-:global(.dark) .navigation a, :global(.dark) .navigation button { color: #e6edf7; }
-:global(.dark) .navigation a:hover { background: #29384d; }
-:global(.dark) .navigation span { color: #a3b1c5; }
+:global(:is(.dark, .halloween)) .navigation { background: #182335; border-color: #344258; box-shadow: 0 4px 16px #0004; }
+:global(:is(.dark, .halloween)) .navigation a, :global(:is(.dark, .halloween)) .navigation button { color: #e6edf7; }
+:global(:is(.dark, .halloween)) .navigation a:hover { background: #29384d; }
+:global(:is(.dark, .halloween)) .navigation span { color: #a3b1c5; }
 @media (max-width: 400px) { .navigation { gap: 6px; } .navigation a, .navigation button { padding: 8px; } }

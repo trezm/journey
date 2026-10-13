@@ -2,7 +2,7 @@
 
 import { useSyncExternalStore } from 'react';
 import { useTheme } from 'next-themes';
-import { Monitor, Moon, Sun } from 'lucide-react';
+import { Ghost, Monitor, Moon, Sun } from 'lucide-react';
 import styles from './theme-switch.module.css';
 
 const subscribe = () => () => {};
@@ -12,8 +12,8 @@ export function ThemeSwitch() {
     const mounted = useSyncExternalStore(subscribe, () => true, () => false);
 
     if (!mounted) return null;
-    const selected = theme === 'light' || theme === 'dark' ? theme : 'system';
-    const Icon = selected === 'system' ? Monitor : selected === 'dark' ? Moon : Sun;
+    const selected = theme === 'light' || theme === 'dark' || theme === 'halloween' ? theme : 'system';
+    const Icon = selected === 'halloween' ? Ghost : selected === 'system' ? Monitor : selected === 'dark' ? Moon : Sun;
 
     return <label className={styles.switch}>
         <Icon size={16} aria-hidden="true" />
@@ -22,6 +22,7 @@ export function ThemeSwitch() {
             <option value="system">System</option>
             <option value="light">Light</option>
             <option value="dark">Dark</option>
+            <option value="halloween">Halloween</option>
         </select>
     </label>;
 }

@@ -5,7 +5,7 @@
 .comment header, .reply header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; color: var(--muted-foreground, #64748b); font-size: .75rem; overflow-wrap: anywhere; }
 .author { font-weight: 400; }
 .comment time, .reply time { margin-left: auto; }
-.body, :global(.dark) .body { margin: 9px 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--foreground, #182234); font-family: inherit; font-size: .9rem; line-height: 1.6; }
+.body, :global(:is(.dark, .halloween)) .body { margin: 9px 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--foreground, #182234); font-family: inherit; font-size: .9rem; line-height: 1.6; }
 .comment footer, .reply footer { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; font-size: .7rem; color: var(--muted-foreground, #64748b); }
 .comment code, .reply code { font-size: inherit; }
 .thread button { border: 0; background: transparent; color: var(--muted-foreground, #64748b); font-size: .75rem; padding: 2px 4px; }
@@ -22,7 +22,7 @@
 .composer > div { display: flex; justify-content: flex-end; gap: 10px; }
 .composer button[type=submit] { padding: 6px 12px; background: #238636; border-radius: 5px; color: #fff; }
 .composer p { font-size: .8rem; color: #b42318; }
-:global(.dark) .comment a { color: #8ab4ff; }
+:global(:is(.dark, .halloween)) .comment a { color: #8ab4ff; }
 @media (max-width: 600px) { .replies { margin-left: 12px; padding-left: 10px; } .comment time, .reply time { margin-left: 0; } }
 .comment, .reply { scroll-margin-top: calc(var(--patch-review-sticky-top, 12px) + 64px); }
 .comment:target, .reply:target { outline: 1px solid var(--muted-foreground, #64748b); outline-offset: -1px; border-radius: 5px; }

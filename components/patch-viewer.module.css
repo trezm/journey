@@ -53,7 +53,7 @@
 .lineCommentToggle:hover, .lineCommentToggle:focus-visible { border-color: var(--border); background: var(--muted); }
 .lineThread { display: grid; gap: 6px; margin: 4px 0 6px; color: var(--foreground); font-family: Inter, ui-sans-serif, system-ui, sans-serif; white-space: normal; }
 .lineComment { display: grid; gap: 3px; padding: 7px 9px; border-left: 2px solid var(--primary); background: var(--muted); color: var(--foreground); font-size: .75rem; white-space: pre-wrap; overflow-wrap: anywhere; }
-.lineComment strong, :global(.dark) .lineComment strong { color: var(--muted-foreground); font-size: .7rem; font-weight: 400; }
+.lineComment strong, :global(:is(.dark, .halloween)) .lineComment strong { color: var(--muted-foreground); font-size: .7rem; font-weight: 400; }
 .lineComment small { color: var(--muted-foreground); }
 .lineComment code { font-size: .7rem; }
 .lineComposer { display: grid; gap: 5px; padding: 7px; border: 1px solid var(--border); border-radius: 5px; background: var(--card); }
@@ -65,35 +65,35 @@
 .srOnly { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border-width: 0; }
 @media (max-width: 700px) { .summary { padding: 15px; } .summary > code { display: none; } .toolbar { padding: 10px; } .fileToggle { flex-basis: 100%; } .viewedLabel { margin-left: auto; } .reviewProgress { margin-left: 0; } }
 
-:global(.dark) .patch { border-color: var(--border); }
-:global(.dark) .summary > svg { color: #a3b1c5; }
-:global(.dark) .summary span,:global(.dark) .summary code { color: var(--muted-foreground); }
-:global(.dark) .contents,:global(.dark) .file { border-color: var(--border); }
-:global(.dark) .toolbar,:global(.dark) .diff th,:global(.dark) .fileNote { background: var(--muted); }
-:global(.dark) .revisions,:global(.dark) .reviewProgress,:global(.dark) .fileNote { color: var(--muted-foreground); }
-:global(.dark) .viewToggle { border-color: var(--border); }
-:global(.dark) .viewToggle button { background: var(--card); color: var(--secondary-foreground); }
-:global(.dark) .viewToggle button + button,:global(.dark) .diff th + th,:global(.dark) .split td:nth-child(3) { border-color: var(--border); }
-:global(.dark) .viewToggle button[aria-pressed=true] { background: var(--accent); color: var(--accent-foreground); }
-:global(.dark) .viewToggle button:focus-visible,:global(.dark) .summary:focus-visible,:global(.dark) .scroll:focus-visible,:global(.dark) .fileToggle:focus-visible,:global(.dark) .viewedLabel input:focus-visible,:global(.dark) .lineComposer textarea:focus-visible,:global(.dark) .lineComposer button:focus-visible { outline-color: var(--ring); }
-:global(.dark) .fileHeading { background: var(--card); }
-:global(.dark) .fileToggle { color: var(--foreground); }
-:global(.dark) .fileToggle svg { color: var(--muted-foreground); }
-:global(.dark) .viewedLabel { border-color: var(--border); background: var(--secondary); color: var(--secondary-foreground); }
-:global(.dark) .fileViewed .viewedLabel { border-color: #315f4c; background: #203f35; color: #a8e2c4; }
-:global(.dark) .fileHeading > span { color: var(--muted-foreground); }
-:global(.dark) .fileHeading > .addedCount { color: #a6e1c0; }
-:global(.dark) .fileHeading > .removedCount { color: #ff9b9b; }
-:global(.dark) .diff th { color: var(--muted-foreground); border-color: var(--border); }
-:global(.dark) .diff td.number { color: #9aa8bc; }
-:global(.dark) .diff td.code { color: var(--foreground); }
-:global(.dark) .diff .context { background: var(--card); }
-:global(.dark) .diff .removed { background: #482b34; }
-:global(.dark) .diff .added { background: #214436; }
-:global(.dark) .diff .blank { background: #202d40; }
-:global(.dark) .diff .hunk td { color: #c3cfdf; background: #27364b; }
-:global(.dark) .message { color: var(--muted-foreground); }
-:global(.dark) .message button { border-color: var(--border); background: var(--card); color: var(--foreground); }
+:global(:is(.dark, .halloween)) .patch { border-color: var(--border); }
+:global(:is(.dark, .halloween)) .summary > svg { color: #a3b1c5; }
+:global(:is(.dark, .halloween)) .summary span,:global(:is(.dark, .halloween)) .summary code { color: var(--muted-foreground); }
+:global(:is(.dark, .halloween)) .contents,:global(:is(.dark, .halloween)) .file { border-color: var(--border); }
+:global(:is(.dark, .halloween)) .toolbar,:global(:is(.dark, .halloween)) .diff th,:global(:is(.dark, .halloween)) .fileNote { background: var(--muted); }
+:global(:is(.dark, .halloween)) .revisions,:global(:is(.dark, .halloween)) .reviewProgress,:global(:is(.dark, .halloween)) .fileNote { color: var(--muted-foreground); }
+:global(:is(.dark, .halloween)) .viewToggle { border-color: var(--border); }
+:global(:is(.dark, .halloween)) .viewToggle button { background: var(--card); color: var(--secondary-foreground); }
+:global(:is(.dark, .halloween)) .viewToggle button + button,:global(:is(.dark, .halloween)) .diff th + th,:global(:is(.dark, .halloween)) .split td:nth-child(3) { border-color: var(--border); }
+:global(:is(.dark, .halloween)) .viewToggle button[aria-pressed=true] { background: var(--accent); color: var(--accent-foreground); }
+:global(:is(.dark, .halloween)) .viewToggle button:focus-visible,:global(:is(.dark, .halloween)) .summary:focus-visible,:global(:is(.dark, .halloween)) .scroll:focus-visible,:global(:is(.dark, .halloween)) .fileToggle:focus-visible,:global(:is(.dark, .halloween)) .viewedLabel input:focus-visible,:global(:is(.dark, .halloween)) .lineComposer textarea:focus-visible,:global(:is(.dark, .halloween)) .lineComposer button:focus-visible { outline-color: var(--ring); }
+:global(:is(.dark, .halloween)) .fileHeading { background: var(--card); }
+:global(:is(.dark, .halloween)) .fileToggle { color: var(--foreground); }
+:global(:is(.dark, .halloween)) .fileToggle svg { color: var(--muted-foreground); }
+:global(:is(.dark, .halloween)) .viewedLabel { border-color: var(--border); background: var(--secondary); color: var(--secondary-foreground); }
+:global(:is(.dark, .halloween)) .fileViewed .viewedLabel { border-color: #315f4c; background: #203f35; color: #a8e2c4; }
+:global(:is(.dark, .halloween)) .fileHeading > span { color: var(--muted-foreground); }
+:global(:is(.dark, .halloween)) .fileHeading > .addedCount { color: #a6e1c0; }
+:global(:is(.dark, .halloween)) .fileHeading > .removedCount { color: #ff9b9b; }
+:global(:is(.dark, .halloween)) .diff th { color: var(--muted-foreground); border-color: var(--border); }
+:global(:is(.dark, .halloween)) .diff td.number { color: #9aa8bc; }
+:global(:is(.dark, .halloween)) .diff td.code { color: var(--foreground); }
+:global(:is(.dark, .halloween)) .diff .context { background: var(--card); }
+:global(:is(.dark, .halloween)) .diff .removed { background: #482b34; }
+:global(:is(.dark, .halloween)) .diff .added { background: #214436; }
+:global(:is(.dark, .halloween)) .diff .blank { background: #202d40; }
+:global(:is(.dark, .halloween)) .diff .hunk td { color: #c3cfdf; background: #27364b; }
+:global(:is(.dark, .halloween)) .message { color: var(--muted-foreground); }
+:global(:is(.dark, .halloween)) .message button { border-color: var(--border); background: var(--card); color: var(--foreground); }
 
 .lineTarget { display: block; width: 100%; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; line-height: inherit; text-align: left; white-space: inherit; overflow-wrap: inherit; cursor: pointer; user-select: text; }
 .lineTarget:hover { background: color-mix(in srgb, var(--primary) 8%, transparent); }

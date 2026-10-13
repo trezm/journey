@@ -135,3 +135,111 @@
 .dark .journeys-index>.section-heading{background:#182335}
 .dark .journeys-filters input,.dark .journeys-filters select{background:#182335;color:#e6edf7}
 .dark .repository-shell .repository-picker{color:#eff3f9}
+
+/* Halloween is an opt-in persisted theme; html.halloween is its public styling contract. */
+.halloween{color-scheme:dark;--background:#171122;--foreground:#f6edf9;--card:#241930;--card-foreground:#f6edf9;--popover:#2c1f39;--popover-foreground:#f6edf9;--primary:#ffab62;--primary-foreground:#291508;--secondary:#362646;--secondary-foreground:#f6edf9;--muted:#30213e;--muted-foreground:#c3afcf;--accent:#3b2a4b;--accent-foreground:#fcf4ff;--destructive:#f87171;--border:#574065;--input:#674f75;--ring:#ffab62}
+.halloween body{background:#171122;color:#f6edf9}
+.halloween p{color:#c3afcf}
+.halloween input,.halloween select,.halloween textarea{background:#241930;border-color:#674f75;color:#f6edf9}
+.halloween input::placeholder,.halloween textarea::placeholder{color:#b9a2c6}
+.halloween select option{background:#241930;color:#f6edf9}
+.halloween .topbar,.halloween .overview-strip,.halloween .changeset-card,.halloween .panel,.halloween .code-panel,.halloween .journeys-index,.halloween .empty-panel{background:#241930;border-color:#574065;color:#f6edf9}
+.halloween .topbar{border-bottom-color:#574065}
+.halloween .breadcrumb,.halloween .breadcrumb strong,.halloween .journey-summary dd,.halloween .journey-summary dl,.halloween .declared,.halloween .journey-heading h2{color:#ebdcf2}
+.halloween .overview-strip>div,.halloween .tabs,.halloween .journey-heading,.halloween .summary-divider{border-color:#574065}
+.halloween .overview-strip span,.halloween .section-heading span,.halloween .section-heading p,.halloween .panel>p,.halloween .side-note p,.halloween .cell-small,.halloween th,.halloween .review-comment p{color:#c3afcf}
+.halloween .status{background:#4a3029;color:#ffb493}
+.halloween .status.review{background:#29375a;color:#b8c8ff}
+.halloween .status.integrated{background:#203f35;color:#a8e2c4}
+.halloween .status.abandoned{background:#303b4d;color:#c1cada}
+.halloween .chip{background:#2c1f39;border-color:#574065;color:#b7c4d8}
+.halloween .chip b{color:#f6edf9}
+.halloween .chip.subtle,.halloween .changeset-foot,.halloween th,.halloween .journeys-row:hover,.halloween .journeys-filters,.halloween .policy,.halloween .credential,.halloween .manifest-entry,.halloween .event-breaking{background:#30213e}
+.halloween .overview-strip strong,.halloween .changeset-head h3,.halloween .patch strong,.halloween td,.halloween td strong,.halloween .section-heading h2,.halloween .panel h3,.halloween .journeys-row h3,.halloween .event strong,.halloween .review-comment strong{color:#f6edf9}
+.halloween .tabs{border-bottom-color:#574065}
+.halloween .tabs button,.halloween .repository-primary a,.halloween .repository-tabs a,.halloween .repository-view-toggle a,.halloween .journeys-pagination,.halloween .journeys-row{color:#c3afcf}
+.halloween .tabs button.active,.halloween .repository-primary a.active,.halloween .repository-tabs a.active,.halloween .repository-view-toggle a.active{color:#ffb777}
+.halloween .count{background:#51342c;color:#ffc4aa}
+.halloween .timeline{border-color:#394961}
+.halloween .timeline-node{background:#30213e;border-color:#44556e;color:#c3cfdf}
+.halloween .patch,.halloween .patch-diff,.halloween .changeset-foot,.halloween .breaking-item,.halloween .waiting,.halloween .review-comment,.halloween .recording-entry,.halloween td,.halloween .endpoint,.halloween .reconcile-list>div{border-color:#574065}
+.halloween .patch summary>svg:first-child,.halloween .patch span,.halloween .patch code,.halloween .journey-summary dl,.halloween .summary-divider{color:#c3afcf}
+.halloween .patch-diff,.halloween .hunk-label,.halloween .editor-context,.halloween .event-icon,.halloween .review-hash,.halloween .source-tree button[aria-current],.halloween .repository-view-toggle a.active{background:#30213e;color:#c4d0e1}
+.halloween .hunk-label{background:#3b2a4b}
+.halloween .added{background:#214436;color:#a6e1c0}
+.halloween .changeset-foot{color:#c3afcf}
+.halloween .journey-summary .declared,.halloween .checklist li{color:#9fdbb9}
+.halloween .lease-time{color:#e5bd7d}
+.halloween .editor-toolbar .mono,.halloween .editor-toolbar .file-picker select{color:#b8c5d8}
+.halloween .editor-context{border-color:#574065}
+.halloween table{color:#d9e2ef}
+.halloween th{border-color:#574065}
+.halloween td{border-bottom-color:#2d3b50}
+.halloween .event-icon{background:#362646;color:#b5c2d5}
+.halloween .event-icon.accepted{background:#203f35;color:#a8e2c4}
+.halloween .review-empty{border-color:#43536b;color:#c3afcf}
+.halloween .integrate-button:disabled{background:#303b4d!important;color:#bca6c9}
+.halloween .workflow-list,.halloween .journeys-pagination,.halloween .journeys-row small{color:#c3afcf}
+.halloween .journeys-row{border-color:#574065}
+.halloween .journeys-row>svg,.halloween .journeys-row small{color:#c3afcf}
+.halloween .journeys-pagination button{background:#30213e;color:#d8e2f0;border-color:#674f75}
+.halloween .source-tree{border-color:#574065}
+.halloween .source-tree button:hover,.halloween .source-tree button[aria-current],.halloween .repository-view-toggle a.active{background:#473052;color:#fff4fb}
+.halloween .repository-primary,.halloween .repository-tabs{border-color:#574065}
+.halloween .repository-view-toggle a{color:#c3afcf}
+.halloween .source-tree summary{color:#c2cede}
+.halloween .source-tree button{color:#bcc9da}
+.halloween .banner.error{color:#ffb4bc;background:#3d252c;border-color:#69343d}
+.halloween .banner.success{color:#a8e2c4;background:#203f35;border-color:#315f4c}
+.halloween .auth-card .error{color:#ffb4bc;background:#3d252c;border:1px solid #69343d;border-radius:5px;padding:9px 11px}
+.halloween .reconcile-banner{background:#3d3025;border-color:#604a31}
+.halloween .reconcile-banner>div{color:#f0bd7d}
+.halloween .reconcile-banner p{color:#d1ad82}
+.halloween .review-hash{color:#dce5f1}
+.halloween .event-breaking{border-color:#574065}
+.halloween .empty-table{color:#c3afcf}
+.halloween .auth{background:#120c1b}
+.halloween .auth-card{background:#241930;color:#f6edf9}
+.halloween .auth-card .wordmark{color:#f6edf9}
+.halloween .auth-card .text-button{color:#ffb777}
+.halloween .auth-card .sign-in{color:#c8b0d4;border-color:#574065}
+.halloween .version{color:#c3afcf;border-color:#674f75}
+.halloween .repository-shell .sidebar{background:#1b1227}
+.halloween .workspace-footer{color:#bca6c9;border-color:#574065}
+.halloween .status.abandoned,.halloween .side-note{color:#c3afcf}
+.halloween .dialog-actions button,.halloween [role=dialog]{color:#f6edf9}
+.halloween [data-slot=dialog-content],.halloween [data-slot=alert-dialog-content],.halloween [data-slot=popover-content],.halloween [data-slot=select-content],.halloween [data-slot=dropdown-menu-content]{background:#2c1f39;color:#f6edf9;border-color:#674f75}
+.halloween [data-slot=dialog-overlay],.halloween [data-slot=alert-dialog-overlay]{background:rgb(0 0 0 / 65%)}
+.halloween [data-slot=select-item]:focus,.halloween [data-slot=dropdown-menu-item]:focus{background:#2a3b53;color:#f3f6fb}
+.halloween [data-slot=button][data-variant=outline],.halloween [data-slot=button][data-variant=ghost]{color:#ebdcf2}
+.halloween .code-panel,.halloween .editor-toolbar,.halloween .table-scroll{border-color:#574065}
+.halloween .editor-toolbar{background:#241930}
+.halloween .file-picker select{background:#241930;color:#f6edf9}
+.halloween .editor-body{background:#101a2a}
+.halloween .line-numbers{background:#0d1726}
+.halloween .journeys-index>.section-heading{background:#241930}
+.halloween .journeys-filters input,.halloween .journeys-filters select{background:#241930;color:#f6edf9}
+.halloween .repository-shell .repository-picker{color:#eff3f9}
+
+.halloween body{background:radial-gradient(ellipse at top right, #392045 0, transparent 55%),#171122;background-attachment:fixed;color:#f6edf9}
+.halloween .sidebar{background:#1b1227;color:#decae8}
+.halloween .brand-icon{background:#f99b4d;color:#291508;box-shadow:0 0 18px rgb(249 155 77 / 18%)}
+.halloween .repository-picker{background:#291c36;border-color:#574065}
+.halloween .repository-picker option{background:#291c36}
+.halloween .sidebar-link,.halloween .journey-link{color:#cdb4da}
+.halloween .journey-link.selected{background:#3b274b;border-color:#76548b;color:#fff0fb}
+.halloween .sidebar-divider,.halloween .sidebar-bottom{border-color:#574065}
+.halloween .sidebar-divider{background:#574065}
+.halloween .workspace-label,.halloween .sidebar-heading,.halloween .account small{color:#bfa3cd}
+.halloween .journey-number{background:#432952;color:#dec3ed}
+.halloween .journey-number.working{background:#583021;color:#ffd1a8}
+.halloween .avatar{background:#493456;color:#f7e8ff}
+.halloween .topbar{background:#21172d}
+.halloween .tabs button.active:after{background:var(--primary)}
+.halloween .overview-tail svg,.halloween .panel-heading svg,.halloween .text-button,.halloween .changeset-foot button{color:var(--primary)}
+.halloween .overview-tail b,.halloween .eyebrow,.halloween .changeset-head .eyebrow{color:#d5b4e4}
+.halloween button:focus-visible,.halloween a:focus-visible,.halloween input:focus-visible,.halloween textarea:focus-visible,.halloween select:focus-visible{outline-color:var(--ring)}
+.halloween .repository-tabs button:focus-visible{outline-color:var(--ring)}
+.halloween .checkbox input{accent-color:var(--primary)}
+.halloween .integrate-button{background:#453050!important;color:#ffedff}
+@media(prefers-reduced-motion:reduce){.halloween body{background-attachment:scroll}}

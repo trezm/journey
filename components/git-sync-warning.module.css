@@ -33,13 +33,13 @@
 .error { font-size:13px; line-height:1.6; margin-top:12px; color:#a23a31; white-space:pre-wrap; overflow-wrap:anywhere; }
 @media(max-width:700px) { .warning{padding:18px 16px}.references{grid-template-columns:1fr}.resume input{max-width:none}.resume button{width:100%} }
 
-:global(.dark) .warning { background: #3d3025; border-color: #72532e; border-left-color: #ce8b45; color: #f0d2a9; }
-:global(.dark) .progress { background: #202d40; border-color: #3a4960; border-left-color: #7898bd; color: #c4d1e2; }
-:global(.dark) .references,:global(.dark) .resume { border-color: #604a31; }
-:global(.dark) .reference a { color: #ffbd84; }
-:global(.dark) .reference button:hover { background: #4a3a2a; }
-:global(.dark) .resume input { background: #182335; border-color: #69563e; color: #e6edf7; }
-:global(.dark) .error { color: #ffaaa3; }
+:global(:is(.dark, .halloween)) .warning { background: #3d3025; border-color: #72532e; border-left-color: #ce8b45; color: #f0d2a9; }
+:global(:is(.dark, .halloween)) .progress { background: #202d40; border-color: #3a4960; border-left-color: #7898bd; color: #c4d1e2; }
+:global(:is(.dark, .halloween)) .references,:global(:is(.dark, .halloween)) .resume { border-color: #604a31; }
+:global(:is(.dark, .halloween)) .reference a { color: #ffbd84; }
+:global(:is(.dark, .halloween)) .reference button:hover { background: #4a3a2a; }
+:global(:is(.dark, .halloween)) .resume input { background: #182335; border-color: #69563e; color: #e6edf7; }
+:global(:is(.dark, .halloween)) .error { color: #ffaaa3; }
 
 .transfer { margin-top:18px; padding-top:16px; border-top:1px solid currentColor; }
 .phase { font-size:13px; line-height:1.6; color:inherit; }
