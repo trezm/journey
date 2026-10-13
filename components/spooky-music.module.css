@@ -1,0 +1,38 @@
+.player {
+    position: fixed;
+    left: 1rem;
+    bottom: 1rem;
+    z-index: 50;
+    width: 218px;
+    padding: 0.65rem 0.8rem;
+    border: 1px solid var(--border);
+    border-radius: 0.8rem;
+    color: var(--foreground);
+    background: var(--background);
+    box-shadow: 0 4px 18px rgb(0 0 0 / 12%);
+    font-size: 0.75rem;
+}
+.heading { display: flex; align-items: center; gap: 0.4rem; font-weight: 600; }
+.heading svg { color: #d97706; }
+.controls { display: flex; align-items: center; gap: 0.75rem; margin-top: 0.4rem; }
+.controls button {
+    padding: 0.3rem 0.65rem;
+    min-width: 3.5rem;
+    min-height: 32px;
+    border: 1px solid var(--border);
+    border-radius: 0.4rem;
+    cursor: pointer;
+    color: var(--foreground);
+    background: var(--muted);
+    font: inherit;
+    font-weight: 600;
+}
+.controls button:disabled { cursor: wait; opacity: 0.7; }
+.controls button[aria-pressed='true'] { color: #fff; background: #9a3412; border-color: #9a3412; }
+.controls button:focus-visible, .volume input:focus-visible { outline: 2px solid #d97706; outline-offset: 3px; }
+.volume { display: flex; align-items: center; gap: 0.4rem; }
+.volume input { width: 68px; accent-color: #c2410c; cursor: pointer; }
+.status { display: block; margin-top: 0.4rem; color: var(--muted-foreground); font-size: 0.65rem; }
+@media (max-width: 540px) {
+    .player { left: 0.75rem; bottom: 4.5rem; }
+}

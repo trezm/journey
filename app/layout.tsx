@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 import { ThemeSwitch } from "@/components/theme-switch";
+import { SpookyMusic } from "@/components/spooky-music";
 
 export const metadata: Metadata = {
   title: "Journey — Agentic Version Control",
@@ -23,6 +24,7 @@ export default function RootLayout({
         <ThemeProvider>
           {children}
           <ThemeSwitch />
+          <SpookyMusic />
         </ThemeProvider>
       </body>
     </html>
