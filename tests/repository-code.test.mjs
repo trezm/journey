@@ -132,6 +132,7 @@ function renderCodeWorkspace(options = {}) {
         if (name === '@/components/review-threads') return { ReviewThreads: () => null };
         if (name === '@/components/halloween-pumpkins') return { HalloweenPumpkins: () => null };
         if (name === '@/components/account-auth') return { AccountAuth: () => null };
+        if (name === '@/components/repository-clone') return { RepositoryClone: props => React.createElement('button', { 'data-project': props.project }, 'Clone repo') };
         if (name === '@/components/public-repository') return { PublicRepository: () => React.createElement('section', null, 'Public accepted repository code') };
         if (name === '@/components/changeset-detail') return { ChangesetDetail: props => React.createElement('section', null, `Changeset detail: ${props.changeset.description}`) };
         if (name === '@/components/repository-navigation') return { RepositoryNavigation: () => null };
