@@ -4,7 +4,7 @@ import { useState, useSyncExternalStore } from 'react';
 import { useTheme } from 'next-themes';
 import styles from './halloween-pumpkins.module.css';
 
-const storageKey = 'journey-pumpkins';
+const STORAGE_KEY = 'journey-pumpkins';
 const preferenceEvent = 'journey-pumpkins-change';
 const subscribe = (listener: () => void) => {
     window.addEventListener('storage', listener);
@@ -16,7 +16,7 @@ const subscribe = (listener: () => void) => {
 };
 const readPreference = () => {
     try {
-        const value = window.localStorage.getItem(storageKey);
+        const value = window.localStorage.getItem(STORAGE_KEY);
         return value === 'on' || value === 'off' ? value : 'auto';
     } catch { return 'auto'; }
 };
@@ -49,7 +49,7 @@ export function HalloweenPumpkins() {
     function toggle() {
         setSessionPreference(visible ? 'off' : 'on');
         try {
-            window.localStorage.setItem(storageKey, visible ? 'off' : 'on');
+            window.localStorage.setItem(STORAGE_KEY, visible ? 'off' : 'on');
             window.dispatchEvent(new Event(preferenceEvent));
         } catch {
             // The current session still works when browser storage is unavailable.
